@@ -246,10 +246,12 @@ func TestAccVcdEdgeGatewayExternalNetworks(t *testing.T) {
 		"PortGroup":             testConfig.Networking.ExternalNetworkPortGroup,
 		"Advanced":              getAdvancedProperty(),
 		"Vcenter":               testConfig.Networking.Vcenter,
+		"EndIp": "192.168.30.55",
 	}
 	configText := templateFill(testAccEdgeGatewayNetworks, params)
 
 	params["FuncName"] = t.Name() + "-step2"
+	params["EndIp"] = "192.168.30.56"
 	configText1 := templateFill(testAccEdgeGatewayNetworks2, params)
 
 	if vcdShortTest {
@@ -746,7 +748,7 @@ resource "vcd_edgegateway" "egw" {
 
 		suballocate_pool {
 			start_address = "192.168.30.53"
-			end_address   = "192.168.30.55"
+			end_address   = "{{.EndIp}}"
 		}
 
 		suballocate_pool {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/kr/pretty"
 	"github.com/vmware/go-vcloud-director/v2/govcd"
 	"github.com/vmware/go-vcloud-director/v2/types/v56"
 )
@@ -16,12 +17,10 @@ var subAllocationPool = &schema.Resource{
 		"start_address": {
 			Required: true,
 			Type:     schema.TypeString,
-			ForceNew: true,
 		},
 		"end_address": {
 			Required: true,
 			Type:     schema.TypeString,
-			ForceNew: true,
 		},
 	},
 }
@@ -30,33 +29,28 @@ var subnetResource = &schema.Resource{
 	Schema: map[string]*schema.Schema{
 		"gateway": {
 			Required:    true,
-			ForceNew:    true,
 			Description: "Gateway address for a subnet",
 			Type:        schema.TypeString,
 		},
 		"netmask": {
 			Required:    true,
-			ForceNew:    true,
 			Description: "Netmask address for a subnet",
 			Type:        schema.TypeString,
 		},
 		"ip_address": {
 			Optional:    true,
 			Type:        schema.TypeString,
-			ForceNew:    true,
 			Description: "IP address on the edge gateway - will be auto-assigned if not defined",
 		},
 		"use_for_default_route": {
 			Optional:    true,
 			Default:     false,
-			ForceNew:    true,
 			Type:        schema.TypeBool,
 			Description: "Defines if this subnet should be used as default gateway for edge",
 		},
 		"suballocate_pool": {
 			Optional:    true,
 			Type:        schema.TypeSet,
-			ForceNew:    true,
 			Description: "Define zero or more blocks to sub-allocate pools on the edge gateway",
 			Elem:        subAllocationPool,
 		},
@@ -66,36 +60,36 @@ var subnetResource = &schema.Resource{
 var externalNetworkResource = &schema.Resource{
 	Schema: map[string]*schema.Schema{
 		"name": {
-			Required:    true,
-			ForceNew:    true,
+			Required: true,
+			// ForceNew:    true,
 			Type:        schema.TypeString,
 			Description: "External network name",
 		},
 		"enable_rate_limit": {
-			Optional:    true,
-			Default:     false,
-			ForceNew:    true,
+			Optional: true,
+			Default:  false,
+			// ForceNew:    true,
 			Type:        schema.TypeBool,
 			Description: "Enable rate limiting",
 		},
 		"incoming_rate_limit": {
-			Optional:    true,
-			Default:     0,
-			ForceNew:    true,
+			Optional: true,
+			Default:  0,
+			// ForceNew:    true,
 			Type:        schema.TypeFloat,
 			Description: "Incoming rate limit (Mbps)",
 		},
 		"outgoing_rate_limit": {
-			Optional:    true,
-			Default:     0,
-			ForceNew:    true,
+			Optional: true,
+			Default:  0,
+			// ForceNew:    true,
 			Type:        schema.TypeFloat,
 			Description: "Outgoing rate limit (Mbps)",
 		},
 		"subnet": {
 			Optional: true,
 			Computed: true,
-			ForceNew: true,
+			// ForceNew: true,
 			Type:     schema.TypeSet,
 			MinItems: 1,
 			Elem:     subnetResource,
@@ -118,7 +112,6 @@ func resourceVcdEdgeGateway() *schema.Resource {
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
-				ForceNew: true,
 			},
 			"org": &schema.Schema{
 				Type:     schema.TypeString,
@@ -136,13 +129,12 @@ func resourceVcdEdgeGateway() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				ForceNew: true,
 			},
 			"advanced": &schema.Schema{
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     true,
-				ForceNew:    true,
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  true,
+				// ForceNew:    true,
 				Description: "True if the gateway uses advanced networking. (Enabled by default)",
 			},
 			"configuration": &schema.Schema{
@@ -261,7 +253,6 @@ func resourceVcdEdgeGateway() *schema.Resource {
 			"external_network": {
 				ConflictsWith: []string{"external_networks", "default_gateway_network"},
 				Description:   "One or more blocks with external network information to be attached to this gateway's interface",
-				ForceNew:      true,
 				Optional:      true,
 				Computed:      true,
 				Type:          schema.TypeSet,
@@ -271,15 +262,11 @@ func resourceVcdEdgeGateway() *schema.Resource {
 	}
 }
 
-// Creates a new edge gateway from a resource definition
-func resourceVcdEdgeGatewayCreate(d *schema.ResourceData, meta interface{}) error {
-	log.Printf("[TRACE] edge gateway creation initiated")
-
-	vcdClient := meta.(*VCDClient)
+func getEdgeGatewayData(vcdClient *VCDClient, d *schema.ResourceData) (orgName string, vdcName string, egwName string, egwConfiguration *types.EdgeGateway, err error) {
 
 	// Making sure the parent entities are available
-	orgName := vcdClient.getOrgName(d)
-	vdcName := vcdClient.getVdcName(d)
+	orgName = vcdClient.getOrgName(d)
+	vdcName = vcdClient.getVdcName(d)
 
 	var missing []string
 	if orgName == "" {
@@ -289,24 +276,24 @@ func resourceVcdEdgeGatewayCreate(d *schema.ResourceData, meta interface{}) erro
 		missing = append(missing, "vdc")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("missing properties. %v should be given either in the resource or at provider level", missing)
+		return "", "", "", nil, fmt.Errorf("missing properties. %v should be given either in the resource or at provider level", missing)
 	}
 
 	org, vdc, err := vcdClient.GetOrgAndVdc(orgName, vdcName)
 	if err != nil {
-		return err
+		return "", "", "", nil, err
 	}
 	if org == nil {
-		return fmt.Errorf("no valid Organization named '%s' was found", orgName)
+		return "", "", "", nil, fmt.Errorf("no valid Organization named '%s' was found", orgName)
 	}
 	if vdc == nil || vdc.Vdc.HREF == "" || vdc.Vdc.ID == "" || vdc.Vdc.Name == "" {
-		return fmt.Errorf("no valid VDC named '%s' was found", vdcName)
+		return "", "", "", nil, fmt.Errorf("no valid VDC named '%s' was found", vdcName)
 	}
 
 	// In version 9.7+ the advanced property is true by default
 	if vcdClient.Client.APIVCDMaxVersionIs(">= 32.0") {
 		if !d.Get("advanced").(bool) {
-			return fmt.Errorf("'advanced' property for vCD 9.7+ must be set to 'true'")
+			return "", "", "", nil, fmt.Errorf("'advanced' property for vCD 9.7+ must be set to 'true'")
 		}
 	}
 
@@ -320,19 +307,19 @@ func resourceVcdEdgeGatewayCreate(d *schema.ResourceData, meta interface{}) erro
 		oldExtNetworksSliceString := convertToStringSlice(simpleExtNetworksSlice.([]interface{}))
 		gwInterfaces, err = getSimpleGatewayInterfaces(vcdClient, oldExtNetworksSliceString, simpleExtDefaultGwNet.(string))
 		if err != nil {
-			return fmt.Errorf("could not process 'external_networks' and 'default_gateway_network': %s", err)
+			return "", "", "", nil, fmt.Errorf("could not process 'external_networks' and 'default_gateway_network': %s", err)
 		}
 	} else {
 		log.Printf("[TRACE] creating edge gateway using advanced 'external_network' blocks")
 		// Get gateway interfaces from complex structure
 		gwInterfaces, err = getGatewayInterfacesType(vcdClient, d.Get("external_network").(*schema.Set))
 		if err != nil {
-			return fmt.Errorf("could not process 'external_network' block(s): %s", err)
+			return "", "", "", nil, fmt.Errorf("could not process 'external_network' block(s): %s", err)
 		}
 	}
 
-	egwName := d.Get("name").(string)
-	egwConfiguration := &types.EdgeGateway{
+	egwName = d.Get("name").(string)
+	egwConfiguration = &types.EdgeGateway{
 		Xmlns:       types.XMLNamespaceVCloud,
 		Name:        egwName,
 		Description: d.Get("description").(string),
@@ -347,6 +334,92 @@ func resourceVcdEdgeGatewayCreate(d *schema.ResourceData, meta interface{}) erro
 			},
 			EdgeGatewayServiceConfiguration: &types.GatewayFeatures{},
 		},
+	}
+	return
+}
+
+// Creates a new edge gateway from a resource definition
+func resourceVcdEdgeGatewayCreate(d *schema.ResourceData, meta interface{}) error {
+	log.Printf("[TRACE] edge gateway creation initiated")
+
+	vcdClient := meta.(*VCDClient)
+
+	/*
+		// Making sure the parent entities are available
+		orgName := vcdClient.getOrgName(d)
+		vdcName := vcdClient.getVdcName(d)
+
+		var missing []string
+		if orgName == "" {
+			missing = append(missing, "org")
+		}
+		if vdcName == "" {
+			missing = append(missing, "vdc")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("missing properties. %v should be given either in the resource or at provider level", missing)
+		}
+
+		org, vdc, err := vcdClient.GetOrgAndVdc(orgName, vdcName)
+		if err != nil {
+			return err
+		}
+		if org == nil {
+			return fmt.Errorf("no valid Organization named '%s' was found", orgName)
+		}
+		if vdc == nil || vdc.Vdc.HREF == "" || vdc.Vdc.ID == "" || vdc.Vdc.Name == "" {
+			return fmt.Errorf("no valid VDC named '%s' was found", vdcName)
+		}
+
+		// In version 9.7+ the advanced property is true by default
+		if vcdClient.Client.APIVCDMaxVersionIs(">= 32.0") {
+			if !d.Get("advanced").(bool) {
+				return fmt.Errorf("'advanced' property for vCD 9.7+ must be set to 'true'")
+			}
+		}
+
+		var gwInterfaces []*types.GatewayInterface
+
+		simpleExtNetworksSlice, simpleExtNetsExist := d.GetOk("external_networks")
+		simpleExtDefaultGwNet := d.Get("default_gateway_network")
+		if simpleExtNetsExist {
+			log.Printf("[TRACE] creating edge gateway using simple 'external_networks' and 'default_gateway_network' fields")
+			// Get gateway interfaces from simple structure
+			oldExtNetworksSliceString := convertToStringSlice(simpleExtNetworksSlice.([]interface{}))
+			gwInterfaces, err = getSimpleGatewayInterfaces(vcdClient, oldExtNetworksSliceString, simpleExtDefaultGwNet.(string))
+			if err != nil {
+				return fmt.Errorf("could not process 'external_networks' and 'default_gateway_network': %s", err)
+			}
+		} else {
+			log.Printf("[TRACE] creating edge gateway using advanced 'external_network' blocks")
+			// Get gateway interfaces from complex structure
+			gwInterfaces, err = getGatewayInterfacesType(vcdClient, d.Get("external_network").(*schema.Set))
+			if err != nil {
+				return fmt.Errorf("could not process 'external_network' block(s): %s", err)
+			}
+		}
+
+		egwName := d.Get("name").(string)
+		egwConfiguration := &types.EdgeGateway{
+			Xmlns:       types.XMLNamespaceVCloud,
+			Name:        egwName,
+			Description: d.Get("description").(string),
+			Configuration: &types.GatewayConfiguration{
+				UseDefaultRouteForDNSRelay: takeBoolPointer(d.Get("use_default_route_for_dns_relay").(bool)),
+				HaEnabled:                  takeBoolPointer(d.Get("ha_enabled").(bool)),
+				GatewayBackingConfig:       d.Get("configuration").(string),
+				AdvancedNetworkingEnabled:  takeBoolPointer(d.Get("advanced").(bool)),
+				DistributedRoutingEnabled:  takeBoolPointer(d.Get("distributed_routing").(bool)),
+				GatewayInterfaces: &types.GatewayInterfaces{
+					GatewayInterface: gwInterfaces,
+				},
+				EdgeGatewayServiceConfiguration: &types.GatewayFeatures{},
+			},
+		}
+	*/
+	orgName, vdcName, egwName, egwConfiguration, err := getEdgeGatewayData(vcdClient, d)
+	if err != nil {
+		return err
 	}
 
 	// vCD 9.0 does not support FIPS Mode and fails if XML tag <FipsModeEnabled> is sent therefore
@@ -463,15 +536,54 @@ func genericVcdEdgeGatewayRead(d *schema.ResourceData, meta interface{}, origin 
 	return nil
 }
 
-// resourceVcdEdgeGatewayUpdate updates general load balancer settings only at the moment
+// resourceVcdEdgeGatewayUpdate updates an edge gateway resource
 func resourceVcdEdgeGatewayUpdate(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
 	vcdClient.lockEdgeGateway(d)
 	defer vcdClient.unlockEdgeGateway(d)
 
-	edgeGateway, err := vcdClient.GetEdgeGatewayFromResource(d, "name")
+	orgName, vdcName, egwName, egwConfiguration, err := getEdgeGatewayData(vcdClient, d)
 	if err != nil {
-		return nil
+		return fmt.Errorf("[edgegateway update] getting data from resource: %s", err)
+	}
+	_, vdc, err := vcdClient.GetOrgAndVdc(orgName, vdcName)
+	if err != nil {
+		return err
+	}
+
+	identifier := d.Id()
+	if identifier == "" {
+		identifier = orgName
+		if d.HasChange("name") {
+			return fmt.Errorf("[edgegateway update] name change requested for edge gateway %s but no ID was retrieved", egwName)
+		}
+	}
+	edgeGateway, err := vdc.GetEdgeGatewayByNameOrId(identifier, false)
+	if err != nil {
+		return fmt.Errorf("[edgegateway update] getting data from resource: %s", err)
+	}
+
+	edgeGateway.EdgeGateway.Xmlns = types.XMLNamespaceVCloud
+	if d.HasChange("name") {
+		edgeGateway.EdgeGateway.Name = egwName
+	}
+	edgeGateway.EdgeGateway.Description = egwConfiguration.Description
+	edgeGateway.EdgeGateway.Configuration.UseDefaultRouteForDNSRelay = egwConfiguration.Configuration.UseDefaultRouteForDNSRelay
+	edgeGateway.EdgeGateway.Configuration.HaEnabled = egwConfiguration.Configuration.HaEnabled
+	edgeGateway.EdgeGateway.Configuration.AdvancedNetworkingEnabled = egwConfiguration.Configuration.AdvancedNetworkingEnabled
+	edgeGateway.EdgeGateway.Configuration.DistributedRoutingEnabled = egwConfiguration.Configuration.DistributedRoutingEnabled
+	edgeGateway.EdgeGateway.Configuration.GatewayBackingConfig = egwConfiguration.Configuration.GatewayBackingConfig
+
+	oldConfig, newConfig := d.GetChange("external_network")
+	fmt.Printf("old config %# v\n",pretty.Formatter(oldConfig))
+	fmt.Printf("new config %# v\n",pretty.Formatter(newConfig))
+	if d.HasChange("external_network") {
+		edgeGateway.EdgeGateway.Configuration.GatewayInterfaces = egwConfiguration.Configuration.GatewayInterfaces
+	}
+
+	err = edgeGateway.Update()
+	if err != nil {
+		return fmt.Errorf("[edgegateway update] running update: %s", err)
 	}
 
 	// If edge gateway is advanced - check if load balancer or firewall needs adjustments
