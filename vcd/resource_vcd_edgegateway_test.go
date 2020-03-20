@@ -246,7 +246,7 @@ func TestAccVcdEdgeGatewayExternalNetworks(t *testing.T) {
 		"PortGroup":             testConfig.Networking.ExternalNetworkPortGroup,
 		"Advanced":              getAdvancedProperty(),
 		"Vcenter":               testConfig.Networking.Vcenter,
-		"EndIp": "192.168.30.55",
+		"EndIp":                 "192.168.30.55",
 	}
 	configText := templateFill(testAccEdgeGatewayNetworks, params)
 

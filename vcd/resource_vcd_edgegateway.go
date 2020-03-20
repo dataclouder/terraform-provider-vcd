@@ -7,7 +7,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
-	"github.com/kr/pretty"
 	"github.com/vmware/go-vcloud-director/v2/govcd"
 	"github.com/vmware/go-vcloud-director/v2/types/v56"
 )
@@ -574,10 +573,8 @@ func resourceVcdEdgeGatewayUpdate(d *schema.ResourceData, meta interface{}) erro
 	edgeGateway.EdgeGateway.Configuration.DistributedRoutingEnabled = egwConfiguration.Configuration.DistributedRoutingEnabled
 	edgeGateway.EdgeGateway.Configuration.GatewayBackingConfig = egwConfiguration.Configuration.GatewayBackingConfig
 
-	oldConfig, newConfig := d.GetChange("external_network")
-	fmt.Printf("old config %# v\n",pretty.Formatter(oldConfig))
-	fmt.Printf("new config %# v\n",pretty.Formatter(newConfig))
 	if d.HasChange("external_network") {
+
 		edgeGateway.EdgeGateway.Configuration.GatewayInterfaces = egwConfiguration.Configuration.GatewayInterfaces
 	}
 
