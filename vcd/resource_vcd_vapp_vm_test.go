@@ -77,11 +77,13 @@ func TestAccVcdVAppVm_Basic(t *testing.T) {
 					resource.TestCheckOutput("disk", diskName),
 					resource.TestCheckOutput("disk_bus_number", "1"),
 					resource.TestCheckOutput("disk_unit_number", "0"),
-					resource.TestCheckResourceAttr("vcd_vapp_vm."+vmName, "disk.3908069514.size_in_mb", "5"),
+					resource.TestCheckTypeSetElemNestedAttrs("vcd_vapp_vm."+vmName, "disk.*", map[string]string{
+						"size_in_mb": "5",
+					}),
 				),
 			},
 			resource.TestStep{
-				ResourceName:      "vcd_vapp_vm." + vmName + "-import",
+				ResourceName:      "vcd_vapp_vm." + vmName,
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: importStateIdVappObject(testConfig, vappName2, vmName),
