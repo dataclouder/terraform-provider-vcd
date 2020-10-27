@@ -212,7 +212,7 @@ func TestAccVcdEdgeGatewayExternalNetworks(t *testing.T) {
 					resource.TestCheckTypeSetElemNestedAttrs("vcd_edgegateway.egw", "external_network.*", map[string]string{
 						"enable_rate_limit":   "false",
 						"incoming_rate_limit": "0",
-						"name":                "extnet-dainius",
+						"name":                testConfig.Networking.ExternalNetwork,
 						"outgoing_rate_limit": "0",
 					}),
 					resource.TestCheckTypeSetElemNestedAttrs("vcd_edgegateway.egw", "external_network.*", map[string]string{
@@ -241,10 +241,6 @@ func TestAccVcdEdgeGatewayExternalNetworks(t *testing.T) {
 						"start_address": "192.168.30.58",
 						"end_address":   "192.168.30.60",
 					}),
-					resource.TestCheckResourceAttr("vcd_edgegateway.egw", "external_network_ips.#", "2"),
-					resource.TestCheckTypeSetElemAttr("vcd_edgegateway.egw", "external_network_ips.*", "192.168.30.51"),
-					resource.TestCheckTypeSetElemAttr("vcd_edgegateway.egw", "external_network_ips.*", "10.150.160.136"),
-
 					resource.TestCheckResourceAttr("vcd_edgegateway.egw", "external_network_ips.#", "2"),
 					resource.TestMatchResourceAttr("vcd_edgegateway.egw", "external_network_ips.0", ipV4Regex),
 					resource.TestMatchResourceAttr("vcd_edgegateway.egw", "external_network_ips.1", ipV4Regex),
