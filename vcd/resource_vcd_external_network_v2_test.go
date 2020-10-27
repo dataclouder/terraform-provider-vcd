@@ -79,33 +79,42 @@ func testAccVcdExternalNetworkV2Nsxt(t *testing.T, nsxtTier0Router string) {
 					resource.TestCheckResourceAttr(resourceName, "vsphere_network.#", "0"),
 					resource.TestCheckResourceAttr(resourceName, "nsxt_network.#", "1"),
 					resource.TestCheckResourceAttr(resourceName, "ip_scope.#", "2"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.dns1", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.dns2", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.dns_suffix", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.enabled", "false"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.gateway", "192.168.30.49"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.prefix_length", "24"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.static_ip_pool.#", "1"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.static_ip_pool.1203345861.end_address", "192.168.30.62"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1420917927.static_ip_pool.1203345861.start_address", "192.168.30.51"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.dns1", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.dns2", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.dns_suffix", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.enabled", "true"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.gateway", "14.14.14.1"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.prefix_length", "24"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.static_ip_pool.#", "2"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.static_ip_pool.2275320158.end_address", "14.14.14.25"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.static_ip_pool.2275320158.start_address", "14.14.14.20"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.static_ip_pool.550532203.end_address", "14.14.14.15"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.3421983869.static_ip_pool.550532203.start_address", "14.14.14.10"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*", map[string]string{
+						"dns1":          "",
+						"dns2":          "",
+						"dns_suffix":    "",
+						"enabled":       "false",
+						"gateway":       "192.168.30.49",
+						"prefix_length": "24",
+					}),
+
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*.static_ip_pool.*", map[string]string{
+						"start_address": "192.168.30.51",
+						"end_address":   "192.168.30.62",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*", map[string]string{
+						"dns1":          "",
+						"dns2":          "",
+						"dns_suffix":    "",
+						"enabled":       "true",
+						"gateway":       "14.14.14.1",
+						"prefix_length": "24",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*.static_ip_pool.*", map[string]string{
+						"start_address": "14.14.14.20",
+						"end_address":   "14.14.14.25",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*.static_ip_pool.*", map[string]string{
+						"start_address": "14.14.14.10",
+						"end_address":   "14.14.14.15",
+					}),
 					resource.TestCheckResourceAttr(resourceName, "nsxt_network.#", "1"),
 					testCheckMatchOutput("nsxt-manager", regexp.MustCompile("^urn:vcloud:nsxtmanager:.*")),
 					testCheckOutputNonEmpty("nsxt-tier0-router"), // Match any non empty string
 				),
 			},
 			resource.TestStep{
-				ResourceName:      resourceName + "-import",
+				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: importStateIdTopHierarchy(t.Name()),
@@ -118,36 +127,21 @@ func testAccVcdExternalNetworkV2Nsxt(t *testing.T, nsxtTier0Router string) {
 					resource.TestCheckResourceAttr(resourceName, "vsphere_network.#", "0"),
 					resource.TestCheckResourceAttr(resourceName, "nsxt_network.#", "1"),
 					resource.TestCheckResourceAttr(resourceName, "ip_scope.#", "1"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.dns1", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.dns2", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.dns_suffix", ""),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.enabled", "true"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.gateway", "192.168.30.49"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.prefix_length", "24"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.static_ip_pool.#", "1"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.end_address", "192.168.30.62"),
-					resource.TestCheckResourceAttr(resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.start_address", "192.168.30.51"),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*", map[string]string{
+						"dns1":          "",
+						"dns2":          "",
+						"dns_suffix":    "",
+						"enabled":       "true",
+						"gateway":       "192.168.30.49",
+						"prefix_length": "24",
+					}),
+					resource.TestCheckTypeSetElemNestedAttrs(resourceName, "ip_scope.*.static_ip_pool.*", map[string]string{
+						"start_address": "192.168.30.51",
+						"end_address":   "192.168.30.62",
+					}),
 					resource.TestCheckResourceAttr(resourceName, "nsxt_network.#", "1"),
 					testCheckMatchOutput("nsxt-manager", regexp.MustCompile("^urn:vcloud:nsxtmanager:.*")),
 					testCheckOutputNonEmpty("nsxt-tier0-router"), // Match any non empty string
-
-					// Data source
-					resource.TestCheckResourceAttrPair(resourceName, "name", "data."+resourceName, "name"),
-					resource.TestCheckResourceAttrPair(resourceName, "description", "data."+resourceName, "description"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.#", "data."+resourceName, "ip_scope.#"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.dns1", "data."+resourceName, "ip_scope.1428757071.dns1"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.dns2", "data."+resourceName, "ip_scope.1428757071.dns2"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.dns_suffix", "data."+resourceName, "ip_scope.1428757071.dns_suffix"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.enabled", "data."+resourceName, "ip_scope.1428757071.enabled"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.gateway", "data."+resourceName, "ip_scope.1428757071.gateway"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.prefix_length", "data."+resourceName, "ip_scope.1428757071.prefix_length"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.static_ip_pool.#", "data."+resourceName, "ip_scope.1428757071.static_ip_pool.#"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.end_address", "data."+resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.end_address"),
-					resource.TestCheckResourceAttrPair(resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.start_address", "data."+resourceName, "ip_scope.1428757071.static_ip_pool.1203345861.start_address"),
-					resource.TestCheckResourceAttrPair(resourceName, "vsphere_network.#", "data."+resourceName, "vsphere_network.#"),
-					resource.TestCheckResourceAttrPair(resourceName, "nsxt_network.#", "data."+resourceName, "nsxt_network.#"),
-					resource.TestMatchResourceAttr("data."+resourceName, "nsxt_network.0.nsxt_manager_id", regexp.MustCompile("^urn:vcloud:nsxtmanager:.*")),
-					resource.TestCheckResourceAttrSet("data."+resourceName, "nsxt_network.0.nsxt_tier0_router_id"),
 				),
 			},
 		},
@@ -232,10 +226,6 @@ resource "vcd_external_network_v2" "ext-net-nsxt" {
       end_address   = "{{.EndAddress}}"
     }
   }
-}
-
-data "vcd_external_network_v2" "ext-net-nsxt" {
-	name = vcd_external_network_v2.ext-net-nsxt.name
 }
 
 output "nsxt-manager" {
