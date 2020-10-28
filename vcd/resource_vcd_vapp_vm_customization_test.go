@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -342,8 +343,8 @@ func TestAccVcdVAppVmCustomizationSettings(t *testing.T) {
 	var (
 		vapp        govcd.VApp
 		vm          govcd.VM
-		netVappName string = t.Name()
-		netVmName1  string = t.Name() + "VM"
+		netVappName = t.Name()
+		netVmName1  = t.Name() + "VM"
 	)
 
 	var params = StringMap{
@@ -394,7 +395,12 @@ func TestAccVcdVAppVmCustomizationSettings(t *testing.T) {
 			},
 			// Step 1 - join org domain must fail
 			resource.TestStep{
-				Taint:  []string{"vcd_vapp_vm.test-vm"},
+				Taint: []string{"vcd_vapp_vm.test-vm"},
+				PreConfig: func() {
+					stdout := getTerraformStdout()
+					fmt.Fprintf(stdout, "Will sleep now")
+					time.Sleep(5 * time.Minute)
+				},
 				Config: configTextVMStep1,
 				// Our testing suite does not have Windows OS to actually try domain join so the point of this test is
 				// to prove that values are actually set and try to be applied on vCD.
