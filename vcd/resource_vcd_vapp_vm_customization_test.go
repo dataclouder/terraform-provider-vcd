@@ -387,7 +387,7 @@ func TestAccVcdVAppVmCustomizationSettings(t *testing.T) {
 					resource.TestCheckResourceAttr("vcd_vapp_vm.test-vm", "customization.0.number_of_auto_logons", "4"),
 				),
 			},
-			// Step 2 - join org domain must fail
+			// Step 2 - join org domain (does not fail because enabled=false even though OS is not windows)
 			resource.TestStep{
 				// Taint:  []string{"vcd_vapp_vm.test-vm"},
 				// Taint does not work in SDK 2.1.0 therefore every test step has resource address changed to force
