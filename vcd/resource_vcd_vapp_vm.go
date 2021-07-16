@@ -24,6 +24,7 @@ type typeOfVm string
 const (
 	standaloneVmType typeOfVm = "vcd_vm"
 	vappVmType       typeOfVm = "vcd_vapp_vm"
+	vappVmV2Type     typeOfVm = "vcd_vapp_vm_v2"
 )
 
 func resourceVcdVAppVm() *schema.Resource {

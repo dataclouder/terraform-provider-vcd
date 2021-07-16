@@ -16,7 +16,7 @@ import (
 // for VMs inside a regular vApp
 func vmNetworkTypeValidator(vmType typeOfVm) schema.SchemaValidateFunc {
 	allowed := []string{"org", "none"}
-	if vmType == vappVmType {
+	if vmType == vappVmType || vmType == vappVmV2Type {
 		allowed = append(allowed, "vapp")
 	}
 	return validation.StringInSlice(allowed, false)
