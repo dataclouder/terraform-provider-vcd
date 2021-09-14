@@ -6,7 +6,7 @@ description: |-
   The VMware Cloud Director provider is used to interact with the resources supported by VMware Cloud Director. The provider needs to be configured with the proper credentials before it can be used.
 ---
 
-# VMware Cloud Director Provider 3.3
+# VMware Cloud Director Provider 3.4
 
 The VMware Cloud Director provider is used to interact with the resources supported by VMware Cloud Director. The provider needs to be configured with the proper credentials before it can be used.
 
@@ -22,7 +22,6 @@ When upgrading the provider please check for such labels for the resources you a
 
 The following Cloud Director versions are supported by this provider:
 
-* 10.0
 * 10.1
 * 10.2
 * 10.3
@@ -174,7 +173,15 @@ then
     exit 1
 fi
 
-auth=$(echo -n "$user@$org:$password" | base64)
+options=""
+os=$(uname -s)
+is_linux=$(echo "$os" | grep -i linux)
+if [ -n "$is_linux" ]
+then
+  options="-w 0"
+fi
+
+auth=$(echo -n "$user@$org:$password" |base64 $options)
 
 curl -I -k --header "Accept: application/*;version=32.0" \
     --header "Authorization: Basic $auth" \
