@@ -1,3 +1,4 @@
+//go:build vapp || vm || catalog || ALL || functional
 // +build vapp vm catalog ALL functional
 
 package vcd
@@ -38,7 +39,9 @@ func testAccCheckVcdVAppVmExists(vappName, vmName, node string, vapp *govcd.VApp
 			return err
 		}
 
-		*vm = *newVm
+		if vm != nil {
+			*vm = *newVm
+		}
 
 		return nil
 	}

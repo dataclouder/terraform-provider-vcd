@@ -1,8 +1,8 @@
 package vcd
 
-//lint:file-ignore SA1019 ignore deprecated functions
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/kr/pretty"
@@ -28,498 +29,513 @@ const (
 )
 
 func resourceVcdVAppVm() *schema.Resource {
-
 	return &schema.Resource{
-		Create: resourceVcdVAppVmCreate,
-		Update: resourceVcdVAppVmUpdate,
-		Read:   resourceVcdVAppVmRead,
-		Delete: resourceVcdVAppVmDelete,
+		CreateContext: resourceVcdVAppVmCreate,
+		UpdateContext: resourceVcdVAppVmUpdate,
+		ReadContext:   resourceVcdVAppVmRead,
+		DeleteContext: resourceVcdVAppVmDelete,
 		Importer: &schema.ResourceImporter{
-			State: resourceVcdVappVmImport,
+			StateContext: resourceVcdVappVmImport,
 		},
-		Schema: vmSchemaFunc(vappVmType),
+		Schema: vcdVAppVmSchema,
 	}
 }
 
-func resourceVcdVAppVmCreate(d *schema.ResourceData, meta interface{}) error {
-	return genericResourceVmCreate(d, meta, vappVmType)
+var vcdVmSchemas = map[typeOfVm]map[string]*schema.Schema{
+	vappVmType:       vcdVAppVmSchema,
+	vappVmV2Type:     vcdVAppVmV2Schema,
+	standaloneVmType: vcdStandaloneVmSchema,
 }
 
-func resourceVcdVAppVmRead(d *schema.ResourceData, meta interface{}) error {
-	return genericVcdVmRead(d, meta, "resource", vappVmType)
-}
-
-func resourceVcdVAppVmUpdate(d *schema.ResourceData, meta interface{}) error {
-	return genericResourceVcdVmUpdate(d, meta, vappVmType)
-}
-
-// VM Schema is defined as global so that it can be directly accessible in other places
-func vmSchemaFunc(vmType typeOfVm) map[string]*schema.Schema {
-	return map[string]*schema.Schema{
-		"vapp_name": &schema.Schema{
-			Type:        schema.TypeString,
-			Required:    vmType == vappVmType,
-			Optional:    vmType == standaloneVmType,
-			Computed:    vmType == standaloneVmType,
-			ForceNew:    vmType == vappVmType,
-			Description: "The vApp this VM belongs to - Required, unless it is a standalone VM",
-		},
-		"vm_type": &schema.Schema{
-			Type:        schema.TypeString,
-			Computed:    true,
-			Description: fmt.Sprintf("Type of VM: either '%s' or '%s'", vappVmType, standaloneVmType),
-		},
-		"name": &schema.Schema{
-			Type:        schema.TypeString,
-			Required:    true,
-			ForceNew:    true,
-			Description: "A name for the VM, unique within the vApp",
-		},
-		"computer_name": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "Computer name to assign to this virtual machine",
-		},
-		"org": {
-			Type:     schema.TypeString,
-			Optional: true,
-			ForceNew: true,
-			Description: "The name of organization to use, optional if defined at provider " +
-				"level. Useful when connected as sysadmin working across different organizations",
-		},
-		"vdc": {
-			Type:        schema.TypeString,
-			Optional:    true,
-			ForceNew:    true,
-			Description: "The name of VDC to use, optional if defined at provider level",
-		},
-		"template_name": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			ForceNew:    true,
-			Description: "The name of the vApp Template to use",
-		},
-		"vm_name_in_template": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			ForceNew:    true,
-			Description: "The name of the VM in vApp Template to use. In cases when vApp template has more than one VM",
-		},
-		"catalog_name": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Description: "The catalog name in which to find the given vApp Template or media for boot_image",
-		},
-		"description": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "The VM description",
-		},
-		"memory": &schema.Schema{
-			Type:         schema.TypeInt,
-			Optional:     true,
-			Computed:     true,
-			Description:  "The amount of RAM (in MB) to allocate to the VM",
-			ValidateFunc: validateMultipleOf4(),
-		},
-		"cpus": &schema.Schema{
-			Type:        schema.TypeInt,
-			Optional:    true,
-			Computed:    true,
-			Description: "The number of virtual CPUs to allocate to the VM",
-		},
-		"cpu_cores": &schema.Schema{
-			Type:        schema.TypeInt,
-			Optional:    true,
-			Computed:    true,
-			Description: "The number of cores per socket",
-		},
-		"metadata": {
-			Type:     schema.TypeMap,
-			Optional: true,
-			// For now underlying go-vcloud-director repo only supports
-			// a value of type String in this map.
-			Description: "Key value map of metadata to assign to this VM",
-		},
-		"href": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "VM Hyper Reference",
-		},
-		"accept_all_eulas": &schema.Schema{
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     true,
-			Description: "Automatically accept EULA if OVA has it",
-		},
-		"power_on": &schema.Schema{
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     true,
-			Description: "A boolean value stating if this VM should be powered on",
-		},
-		"storage_profile": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "Storage profile to override the default one",
-		},
-		"os_type": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "Operating System type. Possible values can be found in documentation.",
-		},
-		"hardware_version": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "Virtual Hardware Version (e.g.`vmx-14`, `vmx-13`, `vmx-12`, etc.)",
-		},
-		"boot_image": &schema.Schema{
-			Type:        schema.TypeString,
-			Optional:    true,
-			Description: "Media name to add as boot image.",
-		},
-		"network_dhcp_wait_seconds": {
-			Optional:     true,
-			Type:         schema.TypeInt,
-			ValidateFunc: validation.IntAtLeast(0),
-			Description: "Optional number of seconds to try and wait for DHCP IP (valid for " +
-				"'network' block only)",
-		},
-		"network": {
-			Optional:    true,
-			Type:        schema.TypeList,
-			Description: " A block to define network interface. Multiple can be used.",
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"type": {
-						Required:     true,
-						Type:         schema.TypeString,
-						ValidateFunc: vmNetworkTypeValidator(vmType),
-						Description:  "Network type to use: 'vapp', 'org' or 'none'. Use 'vapp' for vApp network, 'org' to attach Org VDC network. 'none' for empty NIC.",
-					},
-					"ip_allocation_mode": {
-						Optional:     true,
-						Type:         schema.TypeString,
-						ValidateFunc: validation.StringInSlice([]string{"POOL", "DHCP", "MANUAL", "NONE"}, false),
-						Description:  "IP address allocation mode. One of POOL, DHCP, MANUAL, NONE",
-					},
-					"name": {
-						ForceNew:    false,
-						Optional:    true, // In case of type = none it is not required
-						Type:        schema.TypeString,
-						Description: "Name of the network this VM should connect to. Always required except for `type` `NONE`",
-					},
-					"ip": {
-						Computed:     true,
-						Optional:     true,
-						Type:         schema.TypeString,
-						ValidateFunc: checkEmptyOrSingleIP(), // Must accept empty string to ease using HCL interpolation
-						Description:  "IP of the VM. Settings depend on `ip_allocation_mode`. Omitted or empty for DHCP, POOL, NONE. Required for MANUAL",
-					},
-					"is_primary": {
-						Optional: true,
-						Computed: true,
-						// By default if the value is omitted it will report schema change
-						// on every terraform operation. The below function
-						// suppresses such cases "" => "false" when applying.
-						DiffSuppressFunc: falseBoolSuppress(),
-						Type:             schema.TypeBool,
-						Description:      "Set to true if network interface should be primary. First network card in the list will be primary by default",
-					},
-					"mac": {
-						Computed:    true,
-						Optional:    true,
-						Type:        schema.TypeString,
-						Description: "Mac address of network interface",
-					},
-					"adapter_type": {
-						Type:             schema.TypeString,
-						Computed:         true,
-						Optional:         true,
-						DiffSuppressFunc: suppressCase,
-						Description:      "Network card adapter type. (e.g. 'E1000', 'E1000E', 'SRIOVETHERNETCARD', 'VMXNET3', 'PCNet32')",
-					},
-					"connected": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Default:     true,
-						Description: "It defines if NIC is connected or not.",
-					},
-				},
-			},
-		},
-		"disk": {
-			Type: schema.TypeSet,
-			Elem: &schema.Resource{Schema: map[string]*schema.Schema{
-				"name": {
-					Type:        schema.TypeString,
-					Required:    true,
-					Description: "Independent disk name",
-				},
-				"bus_number": {
-					Type:        schema.TypeString,
-					Required:    true,
-					Description: "Bus number on which to place the disk controller",
-				},
-				"unit_number": {
-					Type:        schema.TypeString,
-					Required:    true,
-					Description: "Unit number (slot) on the bus specified by BusNumber",
-				},
-				"size_in_mb": {
-					Type:        schema.TypeInt,
-					Computed:    true,
-					Description: "The size of the disk in MB.",
-				},
-			}},
-			Optional: true,
-			Set:      resourceVcdVmIndependentDiskHash,
-		},
-		"override_template_disk": {
-			Type:        schema.TypeSet,
-			Optional:    true,
-			ForceNew:    true,
-			Description: "A block to match internal_disk interface in template. Multiple can be used. Disk will be matched by bus_type, bus_number and unit_number.",
-			Elem: &schema.Resource{Schema: map[string]*schema.Schema{
-				"bus_type": {
-					Type:         schema.TypeString,
+var vcdVAppVmSchema = map[string]*schema.Schema{
+	"vapp_name": &schema.Schema{
+		Type:        schema.TypeString,
+		Required:    true,
+		ForceNew:    true,
+		Description: "The vApp this VM belongs to - Required, unless it is a standalone VM",
+	},
+	"vapp_id": &schema.Schema{
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "The vApp this VM belongs to - Required for vcd_vapp_vm_v2",
+	},
+	"vm_type": &schema.Schema{
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: fmt.Sprintf("Type of VM: one of '%s', '%s', or '%s'", vappVmType, standaloneVmType, vappVmV2Type),
+	},
+	"name": &schema.Schema{
+		Type:        schema.TypeString,
+		Required:    true,
+		ForceNew:    true,
+		Description: "A name for the VM, unique within the vApp",
+	},
+	"computer_name": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "Computer name to assign to this virtual machine",
+	},
+	"org": {
+		Type:     schema.TypeString,
+		Optional: true,
+		ForceNew: true,
+		Description: "The name of organization to use, optional if defined at provider " +
+			"level. Useful when connected as sysadmin working across different organizations",
+	},
+	"vdc": {
+		Type:        schema.TypeString,
+		Optional:    true,
+		ForceNew:    true,
+		Description: "The name of VDC to use, optional if defined at provider level",
+	},
+	"template_name": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		ForceNew:    true,
+		Description: "The name of the vApp Template to use",
+	},
+	"catalog_item_id": &schema.Schema{
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "The ID of the catalog item containing the vApp Template to use",
+	},
+	"vm_name_in_template": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		ForceNew:    true,
+		Description: "The name of the VM in vApp Template to use. In cases when vApp template has more than one VM",
+	},
+	"catalog_name": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Description: "The catalog name in which to find the given vApp Template or media for boot_image",
+	},
+	"description": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "The VM description",
+	},
+	"memory": &schema.Schema{
+		Type:         schema.TypeInt,
+		Optional:     true,
+		Computed:     true,
+		Description:  "The amount of RAM (in MB) to allocate to the VM",
+		ValidateFunc: validateMultipleOf4(),
+	},
+	"cpus": &schema.Schema{
+		Type:        schema.TypeInt,
+		Optional:    true,
+		Computed:    true,
+		Description: "The number of virtual CPUs to allocate to the VM",
+	},
+	"cpu_cores": &schema.Schema{
+		Type:        schema.TypeInt,
+		Optional:    true,
+		Computed:    true,
+		Description: "The number of cores per socket",
+	},
+	"metadata": {
+		Type:     schema.TypeMap,
+		Optional: true,
+		// For now underlying go-vcloud-director repo only supports
+		// a value of type String in this map.
+		Description: "Key value map of metadata to assign to this VM",
+	},
+	"href": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "VM Hyper Reference",
+	},
+	"accept_all_eulas": &schema.Schema{
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     true,
+		Description: "Automatically accept EULA if OVA has it",
+	},
+	"power_on": &schema.Schema{
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     true,
+		Description: "A boolean value stating if this VM should be powered on",
+	},
+	"storage_profile": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "Storage profile to override the default one",
+	},
+	"os_type": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "Operating System type. Possible values can be found in documentation.",
+	},
+	"hardware_version": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "Virtual Hardware Version (e.g.`vmx-14`, `vmx-13`, `vmx-12`, etc.)",
+	},
+	"boot_image": &schema.Schema{
+		Type:        schema.TypeString,
+		Optional:    true,
+		Description: "Media name to add as boot image.",
+	},
+	"boot_image_id": &schema.Schema{
+		Type:        schema.TypeString,
+		Computed:    true,
+		Description: "ID of the Media to add as boot image.",
+	},
+	"network_dhcp_wait_seconds": {
+		Optional:     true,
+		Type:         schema.TypeInt,
+		ValidateFunc: validation.IntAtLeast(0),
+		Description: "Optional number of seconds to try and wait for DHCP IP (valid for " +
+			"'network' block only)",
+	},
+	"network": {
+		Optional:    true,
+		Type:        schema.TypeList,
+		Description: " A block to define network interface. Multiple can be used.",
+		Elem: &schema.Resource{
+			Schema: map[string]*schema.Schema{
+				"type": {
 					Required:     true,
-					ForceNew:     true,
-					ValidateFunc: validation.StringInSlice([]string{"ide", "parallel", "sas", "paravirtual", "sata"}, false),
-					Description:  "The type of disk controller. Possible values: ide, parallel( LSI Logic Parallel SCSI), sas(LSI Logic SAS (SCSI)), paravirtual(Paravirtual (SCSI)), sata",
+					Type:         schema.TypeString,
+					ValidateFunc: vmNetworkTypeValidator(vappVmType),
+					Description:  "Network type to use: 'vapp', 'org' or 'none'. Use 'vapp' for vApp network, 'org' to attach Org VDC network. 'none' for empty NIC.",
 				},
-				"size_in_mb": {
-					Type:        schema.TypeInt,
-					ForceNew:    true,
-					Required:    true,
-					Description: "The size of the disk in MB.",
+				"ip_allocation_mode": {
+					Optional:     true,
+					Type:         schema.TypeString,
+					ValidateFunc: validation.StringInSlice([]string{"POOL", "DHCP", "MANUAL", "NONE"}, false),
+					Description:  "IP address allocation mode. One of POOL, DHCP, MANUAL, NONE",
 				},
-				"bus_number": {
-					Type:        schema.TypeInt,
-					ForceNew:    true,
-					Required:    true,
-					Description: "The number of the SCSI or IDE controller itself.",
+				"name": {
+					ForceNew:    false,
+					Optional:    true, // In case of type = none it is not required
+					Type:        schema.TypeString,
+					Description: "Name of the network this VM should connect to. Always required except for `type` `NONE`",
 				},
-				"unit_number": {
-					Type:        schema.TypeInt,
-					ForceNew:    true,
-					Required:    true,
-					Description: "The device number on the SCSI or IDE controller of the disk.",
+				"ip": {
+					Computed:     true,
+					Optional:     true,
+					Type:         schema.TypeString,
+					ValidateFunc: checkEmptyOrSingleIP(), // Must accept empty string to ease using HCL interpolation
+					Description:  "IP of the VM. Settings depend on `ip_allocation_mode`. Omitted or empty for DHCP, POOL, NONE. Required for MANUAL",
 				},
-				"iops": {
-					Type:        schema.TypeInt,
-					ForceNew:    true,
+				"is_primary": {
+					Optional: true,
+					Computed: true,
+					// By default if the value is omitted it will report schema change
+					// on every terraform operation. The below function
+					// suppresses such cases "" => "false" when applying.
+					DiffSuppressFunc: falseBoolSuppress(),
+					Type:             schema.TypeBool,
+					Description:      "Set to true if network interface should be primary. First network card in the list will be primary by default",
+				},
+				"mac": {
+					Computed:    true,
 					Optional:    true,
-					Description: "Specifies the IOPS for the disk. Default is 0.",
-				},
-				"storage_profile": &schema.Schema{
 					Type:        schema.TypeString,
-					ForceNew:    true,
-					Optional:    true,
-					Description: "Storage profile to override the VM default one",
+					Description: "Mac address of network interface",
 				},
-			}},
-		},
-		"internal_disk": {
-			Type:        schema.TypeList,
-			Computed:    true,
-			Description: "A block will show internal disk details",
-			Elem: &schema.Resource{Schema: map[string]*schema.Schema{
-				"disk_id": {
-					Type:        schema.TypeString,
-					Computed:    true,
-					Description: "The disk ID.",
+				"adapter_type": {
+					Type:             schema.TypeString,
+					Computed:         true,
+					Optional:         true,
+					DiffSuppressFunc: suppressCase,
+					Description:      "Network card adapter type. (e.g. 'E1000', 'E1000E', 'SRIOVETHERNETCARD', 'VMXNET3', 'PCNet32')",
 				},
-				"bus_type": {
-					Type:        schema.TypeString,
-					Computed:    true,
-					Description: "The type of disk controller. Possible values: ide, parallel( LSI Logic Parallel SCSI), sas(LSI Logic SAS (SCSI)), paravirtual(Paravirtual (SCSI)), sata",
-				},
-				"size_in_mb": {
-					Type:        schema.TypeInt,
-					Computed:    true,
-					Description: "The size of the disk in MB.",
-				},
-				"bus_number": {
-					Type:        schema.TypeInt,
-					Computed:    true,
-					Description: "The number of the SCSI or IDE controller itself.",
-				},
-				"unit_number": {
-					Type:        schema.TypeInt,
-					Computed:    true,
-					Description: "The device number on the SCSI or IDE controller of the disk.",
-				},
-				"thin_provisioned": {
+				"connected": {
 					Type:        schema.TypeBool,
-					Computed:    true,
-					Description: "Specifies whether the disk storage is pre-allocated or allocated on demand.",
-				},
-				"iops": {
-					Type:        schema.TypeInt,
-					Computed:    true,
-					Description: "Specifies the IOPS for the disk. Default is 0.",
-				},
-				"storage_profile": &schema.Schema{
-					Type:        schema.TypeString,
-					Computed:    true,
-					Description: "Storage profile to override the VM default one",
-				},
-			}},
-		},
-		"expose_hardware_virtualization": &schema.Schema{
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     false,
-			Description: "Expose hardware-assisted CPU virtualization to guest OS.",
-		},
-		"guest_properties": {
-			Type:        schema.TypeMap,
-			Optional:    true,
-			Description: "Key/value settings for guest properties",
-		},
-		"customization": &schema.Schema{
-			Optional:    true,
-			Computed:    true,
-			MinItems:    1,
-			MaxItems:    1,
-			Type:        schema.TypeList,
-			Description: "Guest customization block",
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"force": {
-						ValidateFunc: noopValueWarningValidator(true,
-							"Using 'true' value for field 'vcd_vapp_vm.customization.force' will reboot VM on every 'terraform apply' operation"),
-						Type:     schema.TypeBool,
-						Optional: true,
-						Default:  false,
-						// This settings is used as a 'flag' and it does not matter what is set in the
-						// state. If it is 'true' - then it means that 'update' procedure must set the
-						// VM for customization at next boot and reboot it.
-						DiffSuppressFunc: suppressFalse(),
-						Description:      "'true' value will cause the VM to reboot on every 'apply' operation",
-					},
-					"enabled": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "'true' value will enable guest customization. It may occur on first boot or when 'force' is used",
-					},
-					"change_sid": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "'true' value will change SID. Applicable only for Windows VMs",
-					},
-					"allow_local_admin_password": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "Allow local administrator password",
-					},
-					"must_change_password_on_first_login": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "Require Administrator to change password on first login",
-					},
-					"auto_generate_password": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "Auto generate password",
-					},
-					"admin_password": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Sensitive:   true,
-						Description: "Manually specify admin password",
-					},
-					"number_of_auto_logons": {
-						Type:         schema.TypeInt,
-						Optional:     true,
-						Computed:     true,
-						Description:  "Number of times to log on automatically. '0' - disabled.",
-						ValidateFunc: validation.IntAtLeast(0),
-					},
-					"join_domain": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "Enable this VM to join a domain",
-					},
-					"join_org_domain": {
-						Type:        schema.TypeBool,
-						Optional:    true,
-						Computed:    true,
-						Description: "Use organization's domain for joining",
-					},
-					"join_domain_name": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Description: "Custom domain name for join",
-					},
-					"join_domain_user": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Description: "Username for custom domain name join",
-					},
-					"join_domain_password": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Sensitive:   true,
-						Description: "Password for custom domain name join",
-					},
-					"join_domain_account_ou": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Description: "Account organizational unit for domain name join",
-					},
-					"initscript": &schema.Schema{
-						Type:        schema.TypeString,
-						Optional:    true,
-						Computed:    true,
-						Description: "Script to run on initial boot or with customization.force=true set",
-					},
+					Optional:    true,
+					Default:     true,
+					Description: "It defines if NIC is connected or not.",
 				},
 			},
 		},
-		"cpu_hot_add_enabled": {
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     false,
-			Description: "True if the virtual machine supports addition of virtual CPUs while powered on.",
+	},
+	"disk": {
+		Type: schema.TypeSet,
+		Elem: &schema.Resource{Schema: map[string]*schema.Schema{
+			"name": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "Independent disk name",
+			},
+			"bus_number": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "Bus number on which to place the disk controller",
+			},
+			"unit_number": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "Unit number (slot) on the bus specified by BusNumber",
+			},
+			"size_in_mb": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "The size of the disk in MB.",
+			},
+		}},
+		Optional: true,
+		Set:      resourceVcdVmIndependentDiskHash,
+	},
+	"override_template_disk": {
+		Type:        schema.TypeSet,
+		Optional:    true,
+		ForceNew:    true,
+		Description: "A block to match internal_disk interface in template. Multiple can be used. Disk will be matched by bus_type, bus_number and unit_number.",
+		Elem: &schema.Resource{Schema: map[string]*schema.Schema{
+			"bus_type": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringInSlice([]string{"ide", "parallel", "sas", "paravirtual", "sata"}, false),
+				Description:  "The type of disk controller. Possible values: ide, parallel( LSI Logic Parallel SCSI), sas(LSI Logic SAS (SCSI)), paravirtual(Paravirtual (SCSI)), sata",
+			},
+			"size_in_mb": {
+				Type:        schema.TypeInt,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The size of the disk in MB.",
+			},
+			"bus_number": {
+				Type:        schema.TypeInt,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The number of the SCSI or IDE controller itself.",
+			},
+			"unit_number": {
+				Type:        schema.TypeInt,
+				ForceNew:    true,
+				Required:    true,
+				Description: "The device number on the SCSI or IDE controller of the disk.",
+			},
+			"iops": {
+				Type:        schema.TypeInt,
+				ForceNew:    true,
+				Optional:    true,
+				Description: "Specifies the IOPS for the disk. Default is 0.",
+			},
+			"storage_profile": &schema.Schema{
+				Type:        schema.TypeString,
+				ForceNew:    true,
+				Optional:    true,
+				Description: "Storage profile to override the VM default one",
+			},
+		}},
+	},
+	"internal_disk": {
+		Type:        schema.TypeList,
+		Computed:    true,
+		Description: "A block will show internal disk details",
+		Elem: &schema.Resource{Schema: map[string]*schema.Schema{
+			"disk_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The disk ID.",
+			},
+			"bus_type": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The type of disk controller. Possible values: ide, parallel( LSI Logic Parallel SCSI), sas(LSI Logic SAS (SCSI)), paravirtual(Paravirtual (SCSI)), sata",
+			},
+			"size_in_mb": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "The size of the disk in MB.",
+			},
+			"bus_number": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "The number of the SCSI or IDE controller itself.",
+			},
+			"unit_number": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "The device number on the SCSI or IDE controller of the disk.",
+			},
+			"thin_provisioned": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Specifies whether the disk storage is pre-allocated or allocated on demand.",
+			},
+			"iops": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Specifies the IOPS for the disk. Default is 0.",
+			},
+			"storage_profile": &schema.Schema{
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Storage profile to override the VM default one",
+			},
+		}},
+	},
+	"expose_hardware_virtualization": &schema.Schema{
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     false,
+		Description: "Expose hardware-assisted CPU virtualization to guest OS.",
+	},
+	"guest_properties": {
+		Type:        schema.TypeMap,
+		Optional:    true,
+		Description: "Key/value settings for guest properties",
+	},
+	"customization": &schema.Schema{
+		Optional:    true,
+		Computed:    true,
+		MinItems:    1,
+		MaxItems:    1,
+		Type:        schema.TypeList,
+		Description: "Guest customization block",
+		Elem: &schema.Resource{
+			Schema: map[string]*schema.Schema{
+				"force": {
+					ValidateFunc: noopValueWarningValidator(true,
+						"Using 'true' value for field 'vcd_vapp_vm.customization.force' will reboot VM on every 'terraform apply' operation"),
+					Type:     schema.TypeBool,
+					Optional: true,
+					Default:  false,
+					// This settings is used as a 'flag' and it does not matter what is set in the
+					// state. If it is 'true' - then it means that 'update' procedure must set the
+					// VM for customization at next boot and reboot it.
+					DiffSuppressFunc: suppressFalse(),
+					Description:      "'true' value will cause the VM to reboot on every 'apply' operation",
+				},
+				"enabled": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "'true' value will enable guest customization. It may occur on first boot or when 'force' is used",
+				},
+				"change_sid": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "'true' value will change SID. Applicable only for Windows VMs",
+				},
+				"allow_local_admin_password": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "Allow local administrator password",
+				},
+				"must_change_password_on_first_login": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "Require Administrator to change password on first login",
+				},
+				"auto_generate_password": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "Auto generate password",
+				},
+				"admin_password": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Sensitive:   true,
+					Description: "Manually specify admin password",
+				},
+				"number_of_auto_logons": {
+					Type:         schema.TypeInt,
+					Optional:     true,
+					Computed:     true,
+					Description:  "Number of times to log on automatically. '0' - disabled.",
+					ValidateFunc: validation.IntAtLeast(0),
+				},
+				"join_domain": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "Enable this VM to join a domain",
+				},
+				"join_org_domain": {
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Computed:    true,
+					Description: "Use organization's domain for joining",
+				},
+				"join_domain_name": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Description: "Custom domain name for join",
+				},
+				"join_domain_user": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Description: "Username for custom domain name join",
+				},
+				"join_domain_password": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Sensitive:   true,
+					Description: "Password for custom domain name join",
+				},
+				"join_domain_account_ou": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Description: "Account organizational unit for domain name join",
+				},
+				"initscript": &schema.Schema{
+					Type:        schema.TypeString,
+					Optional:    true,
+					Computed:    true,
+					Description: "Script to run on initial boot or with customization.force=true set",
+				},
+			},
 		},
-		"memory_hot_add_enabled": {
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     false,
-			Description: "True if the virtual machine supports addition of memory while powered on.",
-		},
-		"prevent_update_power_off": {
-			Type:        schema.TypeBool,
-			Optional:    true,
-			Default:     false,
-			Description: "True if the update of resource should fail when virtual machine power off needed.",
-		},
-		"sizing_policy_id": {
-			Type:        schema.TypeString,
-			Optional:    true,
-			Computed:    true,
-			Description: "VM sizing policy ID. Has to be assigned to Org VDC.",
-		},
-	}
+	},
+	"cpu_hot_add_enabled": {
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     false,
+		Description: "True if the virtual machine supports addition of virtual CPUs while powered on.",
+	},
+	"memory_hot_add_enabled": {
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     false,
+		Description: "True if the virtual machine supports addition of memory while powered on.",
+	},
+	"prevent_update_power_off": {
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Default:     false,
+		Description: "True if the update of resource should fail when virtual machine power off needed.",
+	},
+	"sizing_policy_id": {
+		Type:        schema.TypeString,
+		Optional:    true,
+		Computed:    true,
+		Description: "VM sizing policy ID. Has to be assigned to Org VDC.",
+	},
+}
+
+func resourceVcdVAppVmCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return genericResourceVmCreate(ctx, d, meta, vappVmType)
+}
+
+func resourceVcdVAppVmRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return genericVcdVmRead(ctx, d, meta, "resource", vappVmType)
+}
+
+func resourceVcdVAppVmUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return genericResourceVcdVmUpdate(ctx, d, meta, vappVmType)
 }
 
 // vmTemplatefromVappTemplate returns a given VM from a vApp template
@@ -536,73 +552,96 @@ func vmTemplatefromVappTemplate(name string, vappTemplate *types.VAppTemplate) *
 	return nil
 }
 
-func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType typeOfVm) error {
+func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta interface{}, vmType typeOfVm) diag.Diagnostics {
 	util.Logger.Printf("[DEBUG] [VM create] started")
 	vcdClient := meta.(*VCDClient)
 
 	vappName := d.Get("vapp_name").(string)
+	vappId := d.Get("vapp_id").(string)
+	concurrentVms := d.Get("concurrent_vms").(int)
 	if vappName == "" && vmType == vappVmType {
-		return fmt.Errorf("vApp name is mandatory for this VM type")
+		return diag.Errorf("vApp name is mandatory for this VM type")
+	}
+	if vappId == "" && vmType == vappVmV2Type {
+		return diag.Errorf("vApp ID is mandatory for this VM type")
+	}
+	if concurrentVms == 0 && vmType == vappVmV2Type {
+		return diag.Errorf("number of concurrent VMs is mandatory for this VM type")
 	}
 	if vappName != "" && vmType == standaloneVmType {
-		return fmt.Errorf("vApp name must not be set for a standalone VM")
+		return diag.Errorf("vApp name must not be set for a standalone VM")
 	}
-	if vappName != "" && vmType == vappVmType {
+	if (vappName != "" && vmType == vappVmType) || (vappId != "" && vmType == vappVmV2Type) {
 		vcdClient.lockParentVapp(d)
 		defer vcdClient.unLockParentVapp(d)
 	}
 
 	org, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
-		return fmt.Errorf(errorRetrievingOrgAndVdc, err)
+		return diag.Errorf(errorRetrievingOrgAndVdc, err)
 	}
 
 	catalogName := d.Get("catalog_name").(string)
 	templateName := d.Get("template_name").(string)
+	templateId := d.Get("catalog_item_id").(string)
 	vmName := d.Get("name").(string)
 	description := d.Get("description").(string)
 	powerOn := d.Get("power_on").(bool)
 
 	var vapp *govcd.VApp
 
+	if vmType == vappVmV2Type {
+
+	}
+
 	//create not empty VM - use provided template
-	if catalogName != "" && templateName != "" {
-
-		catalog, err := org.GetCatalogByName(catalogName, false)
+	if (catalogName != "" && templateName != "") || templateId != "" {
+		vappTemplate, err := getVmTemplate(d, vcdClient, org, vdc)
 		if err != nil {
-			return fmt.Errorf("error finding catalog %s: %s", catalogName, err)
+			return diag.Errorf("error finding vApp template: %s", err)
 		}
-
-		var vappTemplate govcd.VAppTemplate
-		if vmNameInTemplate, ok := d.GetOk("vm_name_in_template"); ok {
-			vmInTemplateRecord, err := vdc.QueryVappVmTemplate(catalogName, templateName, vmNameInTemplate.(string))
+		/*
+			catalog, err := org.GetCatalogByName(catalogName, false)
 			if err != nil {
-				return fmt.Errorf("error quering VM template %s: %s", vmNameInTemplate, err)
-			}
-			util.Logger.Printf("[VM create] vmInTemplateRecord %# v", pretty.Formatter(vmInTemplateRecord))
-			returnedVappTemplate, err := catalog.GetVappTemplateByHref(vmInTemplateRecord.HREF)
-			if err != nil {
-				return fmt.Errorf("error quering VM template %s: %s", vmNameInTemplate, err)
-			}
-			util.Logger.Printf("[VM create] returnedVappTemplate %#v", pretty.Formatter(returnedVappTemplate))
-			vappTemplate = *returnedVappTemplate
-		} else {
-			catalogItem, err := catalog.GetCatalogItemByName(templateName, false)
-			if err != nil {
-				return fmt.Errorf("error finding catalog item %s: %s", templateName, err)
-			}
-			vappTemplate, err = catalogItem.GetVAppTemplate()
-			if err != nil {
-				return fmt.Errorf("[VM create] error finding VAppTemplate %s: %s", templateName, err)
+				return diag.Errorf("error finding catalog %s: %s", catalogName, err)
 			}
 
-		}
+			var vappTemplate govcd.VAppTemplate
+			if vmNameInTemplate, ok := d.GetOk("vm_name_in_template"); ok {
+				vmInTemplateRecord, err := vdc.QueryVappVmTemplate(catalogName, templateName, vmNameInTemplate.(string))
+				if err != nil {
+					return diag.Errorf("error quering VM template %s: %s", vmNameInTemplate, err)
+				}
+				util.Logger.Printf("[VM create] vmInTemplateRecord %# v", pretty.Formatter(vmInTemplateRecord))
+				returnedVappTemplate, err := catalog.GetVappTemplateByHref(vmInTemplateRecord.HREF)
+				if err != nil {
+					return diag.Errorf("error querying VM template %s: %s", vmNameInTemplate, err)
+				}
+				util.Logger.Printf("[VM create] returnedVappTemplate %#v", pretty.Formatter(returnedVappTemplate))
+				vappTemplate = *returnedVappTemplate
+			} else {
+				catalogItem, err := catalog.GetCatalogItemByName(templateName, false)
+				if err != nil {
+					return diag.Errorf("error finding catalog item %s: %s", templateName, err)
+				}
+				vappTemplate, err = catalogItem.GetVAppTemplate()
+				if err != nil {
+					return diag.Errorf("[VM create] error finding VAppTemplate %s: %s", templateName, err)
+				}
+
+			}
+
+		*/
 		acceptEulas := d.Get("accept_all_eulas").(bool)
 
-		if vappName != "" {
-			vapp, err = vdc.GetVAppByName(vappName, false)
+		vappIdentifier := vappName
+		if vappName == "" {
+			vappIdentifier = vappId
+		}
+		if vappIdentifier != "" {
+			vapp, err = vdc.GetVAppByNameOrId(vappIdentifier, false)
 			if err != nil {
-				return fmt.Errorf("[VM create] error finding vApp %s: %s", vappName, err)
+				return diag.Errorf("[VM create] error finding vApp %s: %s", vappName, err)
 			}
 		}
 
@@ -610,7 +649,7 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 		if len(d.Get("network").([]interface{})) > 0 {
 			networkConnectionSection, err = networksToConfig(d, vdc, vapp, vcdClient)
 			if err != nil {
-				return fmt.Errorf("unable to process network configuration: %s", err)
+				return diag.Errorf("unable to process network configuration: %s", err)
 			}
 			util.Logger.Printf("[VM create] networkConnectionSection %# v", pretty.Formatter(networkConnectionSection))
 		}
@@ -622,7 +661,7 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 		if storageProfileName != "" {
 			storageProfile, err = vdc.FindStorageProfileReference(storageProfileName)
 			if err != nil {
-				return fmt.Errorf("[vm creation] error retrieving storage profile %s : %s", storageProfileName, err)
+				return diag.Errorf("[vm creation] error retrieving storage profile %s : %s", storageProfileName, err)
 			}
 		} else {
 			storageProfilePtr = nil
@@ -633,11 +672,11 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 		if value, ok := d.GetOk("sizing_policy_id"); ok {
 			vdcComputePolicy, err := org.GetVdcComputePolicyById(value.(string))
 			if err != nil {
-				return fmt.Errorf("error getting sizing policy %s: %s", value.(string), err)
+				return diag.Errorf("error getting sizing policy %s: %s", value.(string), err)
 			}
 			sizingPolicy = vdcComputePolicy.VdcComputePolicy
 			if vdcComputePolicy.Href == "" {
-				return fmt.Errorf("empty sizing policy HREF detected")
+				return diag.Errorf("empty sizing policy HREF detected")
 			}
 			vmComputePolicy = &types.ComputePolicy{
 				VmSizingPolicy: &types.Reference{HREF: vdcComputePolicy.Href},
@@ -678,31 +717,46 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 			vm, err = vdc.CreateStandaloneVMFromTemplate(&vmParams)
 			if err != nil {
 				d.SetId("")
-				return fmt.Errorf("[VM creation] error creating standalone VM %s : %s", vmName, err)
+				return diag.Errorf("[VM creation] error creating standalone VM %s : %s", vmName, err)
 			}
 			util.Logger.Printf("[VM create] VM after creation %# v", pretty.Formatter(vm.VM))
 			vapp, err = vm.GetParentVApp()
 			if err != nil {
 				d.SetId("")
-				return fmt.Errorf("[VM creation] error retrieving vApp from standalone VM %s : %s", vmName, err)
+				return diag.Errorf("[VM creation] error retrieving vApp from standalone VM %s : %s", vmName, err)
 			}
 			util.Logger.Printf("[VM create] vApp after creation %# v", pretty.Formatter(vapp.VApp))
 			_ = d.Set("vapp_name", vapp.VApp.Name)
 		} else {
-			task, err := vapp.AddNewVMWithComputePolicy(vmName, vappTemplate, &networkConnectionSection, storageProfilePtr, sizingPolicy, acceptEulas)
-			if err != nil {
-				return fmt.Errorf("[VM creation] error adding VM: %s", err)
-			}
-			err = task.WaitTaskCompletion()
-			if err != nil {
-				return fmt.Errorf(errorCompletingTask, err)
-			}
+			if vappId != "" {
+				// Build a parallel VM
+				creation := &types.Reference{
+					HREF: vappTemplate.VAppTemplate.HREF,
+					ID:   vappTemplate.VAppTemplate.ID,
+					Type: vappTemplate.VAppTemplate.Type,
+					Name: vmName,
+				}
+				_, err := govcd.CreateParallelVm(vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
+				if err != nil {
+					return diag.Errorf("error creating parallel VM: %s", err)
+				}
 
-			vm, err = vapp.GetVMByName(vmName, true)
+			} else {
+				task, err := vapp.AddNewVMWithComputePolicy(vmName, vappTemplate, &networkConnectionSection, storageProfilePtr, sizingPolicy, acceptEulas)
+				if err != nil {
+					return diag.Errorf("[VM creation] error adding VM: %s", err)
+				}
+				err = task.WaitTaskCompletion()
+				if err != nil {
+					return diag.Errorf(errorCompletingTask, err)
+				}
 
-			if err != nil {
-				d.SetId("")
-				return fmt.Errorf("[VM creation] error getting VM %s : %s", vmName, err)
+				vm, err = vapp.GetVMByName(vmName, true)
+
+				if err != nil {
+					d.SetId("")
+					return diag.Errorf("[VM creation] error getting VM %s : %s", vmName, err)
+				}
 			}
 		}
 
@@ -710,31 +764,36 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 		if vapp.VApp.IsAutoNature {
 			computedVmType = string(standaloneVmType)
 		} else {
-			computedVmType = string(vappVmType)
+			if vappId != "" {
+				computedVmType = string(vappVmV2Type)
+			} else {
+				computedVmType = string(vappVmType)
+			}
 		}
 		// VM creation already succeeded so ID must be set
 		d.SetId(vm.VM.ID)
 		_ = d.Set("vm_type", computedVmType)
+		_ = d.Set("vapp_id", vapp.VApp.ID)
 
 		err = handleExposeHardwareVirtualization(d, vm)
 		if err != nil {
-			return err
+			return diag.Errorf("%s", err)
 		}
 
 		if err := updateGuestCustomizationSetting(d, vm); err != nil {
-			return fmt.Errorf("error setting guest customization during creation: %s", err)
+			return diag.Errorf("error setting guest customization during creation: %s", err)
 		}
 
 		err = addRemoveGuestProperties(d, vm)
 		if err != nil {
-			return err
+			return diag.Errorf("%s", err)
 		}
 
 		// update existing internal disks in template
 		err = updateTemplateInternalDisks(d, meta, *vm)
 		if err != nil {
 			d.Set("override_template_disk", nil)
-			return fmt.Errorf("error managing internal disks : %s", err)
+			return diag.Errorf("error managing internal disks : %s", err)
 		} else {
 			// add details of internal disk to state
 			errReadInternalDisk := updateStateOfInternalDisks(d, *vm)
@@ -746,42 +805,109 @@ func genericResourceVmCreate(d *schema.ResourceData, meta interface{}, vmType ty
 
 		err = addRemoveMetaData(d, vm)
 		if err != nil {
-			return err
+			return diag.Errorf("%s", err)
 		}
 
 		// TODO do not trigger resourceVcdVAppVmUpdate from create. These must be separate actions.
-		err = resourceVcdVAppVmUpdateExecute(d, meta, "create", vmType)
-		if err != nil {
+		diagErr := resourceVcdVAppVmUpdateExecute(ctx, d, meta, "create", vmType)
+		if diagErr != nil {
 			errAttachedDisk := updateStateOfAttachedDisks(d, *vm, vdc)
 			if errAttachedDisk != nil {
 				d.Set("disk", nil)
-				return fmt.Errorf("error reading attached disks : %s and internal error : %s", errAttachedDisk, err)
+				return diag.Errorf("error reading attached disks : %s and internal error : %s", errAttachedDisk, err.Error())
 			}
-			return err
+			return diagErr
 		}
 	} else {
 		//create empty VM
-		vm, err := addEmptyVm(d, vcdClient, org, vdc, vappName)
+		vm, err := addEmptyVm(d, vcdClient, org, vdc, vappName, vappId)
 		if err != nil {
-			return err
+			return diag.Errorf("%s", err)
 		}
 		if err != nil {
 			d.SetId("")
-			return fmt.Errorf("[VM creation] error creating standalone VM %s : %s", vmName, err)
+			return diag.Errorf("[VM creation] error creating VM %s : %s", vmName, err)
 		}
 		util.Logger.Printf("[VM create] VM after creation %# v", pretty.Formatter(vm.VM))
 		vapp, err = vm.GetParentVApp()
 		if err != nil {
 			d.SetId("")
-			return fmt.Errorf("[VM creation] error retrieving vApp from standalone VM %s : %s", vmName, err)
+			return diag.Errorf("[VM creation] error retrieving vApp from VM %s : %s", vmName, err)
 		}
 		util.Logger.Printf("[VM create] vApp after creation %# v", pretty.Formatter(vapp.VApp))
 		_ = d.Set("vapp_name", vapp.VApp.Name)
-		return genericVcdVmRead(d, meta, "create", vmType)
+		return genericVcdVmRead(ctx, d, meta, "create", vmType)
 	}
 
 	log.Printf("[DEBUG] [VM create] finished")
 	return nil
+}
+
+func getVmTemplate(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vdc *govcd.Vdc) (govcd.VAppTemplate, error) {
+	var vappTemplate govcd.VAppTemplate
+	catalogName := d.Get("catalog_name").(string)
+	templateName := d.Get("template_name").(string)
+	vmNameInTemplate := d.Get("vm_name_in_template").(string)
+	templateId := d.Get("catalog_item_id").(string)
+	var catalog *govcd.Catalog
+	var err error
+
+	if templateId != "" {
+		catalogItem, err := vcdClient.Client.GetCatalogItemById(templateId)
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error finding catalog item: %s", err)
+		}
+		vappTemplate, err = catalogItem.GetVAppTemplate()
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error finding catalog item: %s", err)
+		}
+
+		catalog, err = catalogItem.GetParentCatalog()
+		if err != nil {
+			return govcd.VAppTemplate{}, err
+		}
+		_ = d.Set("catalog_name", catalog.Catalog.Name)
+		_ = d.Set("template_name", catalogItem.CatalogItem.Name)
+		// if vmInTemplate is not empty, instead of returning the template (which contains multiple items)
+		// we set the catalog name and template name, so that they will be used in the next block
+		// to find the inner template
+		if vmNameInTemplate != "" {
+			catalogName = catalog.Catalog.Name
+			templateName = catalogItem.CatalogItem.Name
+		} else {
+			// if no inner template was requested, the one found by ID is good, and we can return it
+			return vappTemplate, nil
+		}
+	}
+	if catalog == nil {
+		catalog, err = org.GetCatalogByName(catalogName, false)
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error finding catalog %s: %s", catalogName, err)
+		}
+	}
+	if vmNameInTemplate != "" {
+		vmInTemplateRecord, err := vdc.QueryVappVmTemplate(catalogName, templateName, vmNameInTemplate)
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error querying VM template %s: %s", vmNameInTemplate, err)
+		}
+		util.Logger.Printf("[VM create] vmInTemplateRecord %# v", pretty.Formatter(vmInTemplateRecord))
+		returnedVappTemplate, err := catalog.GetVappTemplateByHref(vmInTemplateRecord.HREF)
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error quering VM template %s: %s", vmNameInTemplate, err)
+		}
+		util.Logger.Printf("[VM create] returnedVappTemplate %#v", pretty.Formatter(returnedVappTemplate))
+		vappTemplate = *returnedVappTemplate
+	} else {
+		catalogItem, err := catalog.GetCatalogItemByName(templateName, false)
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("error finding catalog item %s: %s", templateName, err)
+		}
+		vappTemplate, err = catalogItem.GetVAppTemplate()
+		if err != nil {
+			return govcd.VAppTemplate{}, fmt.Errorf("[VM create] error finding VAppTemplate %s: %s", templateName, err)
+		}
+	}
+	return vappTemplate, nil
 }
 
 // isItVappNetwork checks if it is an vApp network (not vApp Org Network)
@@ -856,7 +982,7 @@ func getVmIndependentDisks(vm govcd.VM) []string {
 	return disks
 }
 
-func genericResourceVcdVmUpdate(d *schema.ResourceData, meta interface{}, vmType typeOfVm) error {
+func genericResourceVcdVmUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}, vmType typeOfVm) diag.Diagnostics {
 	log.Printf("[DEBUG] [VM update] started with lock")
 	vcdClient := meta.(*VCDClient)
 
@@ -872,17 +998,17 @@ func genericResourceVcdVmUpdate(d *schema.ResourceData, meta interface{}, vmType
 
 	// Exit early only if "network_dhcp_wait_seconds" is changed because this field only supports
 	// update so that its value can be written into statefile and be accessible in read function
-	if onlyHasChange("network_dhcp_wait_seconds", vmSchemaFunc(vmType), d) {
+	if onlyHasChange("network_dhcp_wait_seconds", vcdVmSchemas[vmType], d) {
 		log.Printf("[DEBUG] [VM update] exiting early because only 'network_dhcp_wait_seconds' has change")
-		return genericVcdVmRead(d, meta, "update", vmType)
+		return genericVcdVmRead(ctx, d, meta, "update", vmType)
 	}
 
 	err := resourceVmHotUpdate(d, meta, vmType)
 	if err != nil {
-		return err
+		return diag.Errorf("%s", err)
 	}
 
-	return resourceVcdVAppVmUpdateExecute(d, meta, "update", vmType)
+	return resourceVcdVAppVmUpdateExecute(ctx, d, meta, "update", vmType)
 }
 
 func resourceVmHotUpdate(d *schema.ResourceData, meta interface{}, vmType typeOfVm) error {
@@ -1047,23 +1173,23 @@ func changeMemorySize(d *schema.ResourceData, vm *govcd.VM) error {
 	return nil
 }
 
-func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, executionType string, vmType typeOfVm) error {
+func resourceVcdVAppVmUpdateExecute(ctx context.Context, d *schema.ResourceData, meta interface{}, executionType string, vmType typeOfVm) diag.Diagnostics {
 	log.Printf("[DEBUG] [VM update] started without lock")
 
 	vcdClient, org, vdc, vapp, identifier, vm, err := getVmFromResource(d, meta, vmType)
 	if err != nil {
-		return err
+		return diag.Errorf("%s", err)
 	}
 
 	if vcdClient.Client.APIVCDMaxVersionIs("< 33.0") {
 		if _, ok := d.GetOk("sizing_policy_id"); ok {
-			return fmt.Errorf("'sizing_policy_id' only available for VCD 10.0+")
+			return diag.Errorf("'sizing_policy_id' only available for VCD 10.0+")
 		}
 	}
 
 	vmStatusBeforeUpdate, err := vm.GetStatus()
 	if err != nil {
-		return fmt.Errorf("[VM update] error getting VM (%s) status before update: %s", identifier, err)
+		return diag.Errorf("[VM update] error getting VM (%s) status before update: %s", identifier, err)
 	}
 
 	// Check if the user requested for forced customization of VM
@@ -1075,7 +1201,7 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 			vm.VM.Name, d.HasChange("customization"), d.HasChange("computer_name"), d.HasChange("name"))
 		err = updateGuestCustomizationSetting(d, vm)
 		if err != nil {
-			return fmt.Errorf("errors updating guest customization: %s", err)
+			return diag.Errorf("errors updating guest customization: %s", err)
 		}
 
 	}
@@ -1097,7 +1223,7 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 		networksNeedsColdChange = true
 	}
 
-	// this represent fields which has to be changed in cold (with VM power off)
+	// this represents fields which has to be changed in cold (with VM power off)
 	if d.HasChanges("cpu_cores", "power_on", "disk", "expose_hardware_virtualization", "boot_image",
 		"hardware_version", "os_type", "description", "cpu_hot_add_enabled",
 		"memory_hot_add_enabled") || memoryNeedsColdChange || cpusNeedsColdChange || networksNeedsColdChange {
@@ -1110,17 +1236,17 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 
 		if vmStatusBeforeUpdate != "POWERED_OFF" {
 			if d.Get("prevent_update_power_off").(bool) && executionType == "update" {
-				return fmt.Errorf("update stopped: VM needs to power off to change properties, but `prevent_update_power_off` is `true`")
+				return diag.Errorf("update stopped: VM needs to power off to change properties, but `prevent_update_power_off` is `true`")
 			}
 			log.Printf("[DEBUG] Un-deploying VM %s for offline update. Previous state %s",
 				vm.VM.Name, vmStatusBeforeUpdate)
 			task, err := vm.Undeploy()
 			if err != nil {
-				return fmt.Errorf("error triggering undeploy for VM %s: %s", vm.VM.Name, err)
+				return diag.Errorf("error triggering undeploy for VM %s: %s", vm.VM.Name, err)
 			}
 			err = task.WaitTaskCompletion()
 			if err != nil {
-				return fmt.Errorf("error waiting for undeploy task for VM %s: %s", vm.VM.Name, err)
+				return diag.Errorf("error waiting for undeploy task for VM %s: %s", vm.VM.Name, err)
 			}
 		}
 
@@ -1131,16 +1257,16 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 				errAttachedDisk := updateStateOfAttachedDisks(d, *vm, vdc)
 				if errAttachedDisk != nil {
 					d.Set("disk", nil)
-					return fmt.Errorf("error reading attached disks : %s and internal error : %s", errAttachedDisk, err)
+					return diag.Errorf("error reading attached disks : %s and internal error : %s", errAttachedDisk, err)
 				}
-				return fmt.Errorf("error attaching-detaching  disks when updating resource : %s", err)
+				return diag.Errorf("error attaching-detaching  disks when updating resource : %s", err)
 			}
 		}
 
 		if memoryNeedsColdChange || executionType == "create" {
 			err = changeMemorySize(d, vm)
 			if err != nil {
-				return err
+				return diag.Errorf("%s", err)
 			}
 		}
 
@@ -1148,30 +1274,30 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 			coreCounts := d.Get("cpu_cores").(int)
 			task, err := vm.ChangeCPUCountWithCore(d.Get("cpus").(int), &coreCounts)
 			if err != nil {
-				return fmt.Errorf("error changing cpu count: %s", err)
+				return diag.Errorf("error changing cpu count: %s", err)
 			}
 
 			err = task.WaitTaskCompletion()
 			if err != nil {
-				return fmt.Errorf(errorCompletingTask, err)
+				return diag.Errorf(errorCompletingTask, err)
 			}
 		}
 
 		if cpusNeedsColdChange || executionType == "create" {
 			err = changeCpuCount(d, vm)
 			if err != nil {
-				return err
+				return diag.Errorf("%s", err)
 			}
 		}
 
 		if networksNeedsColdChange {
 			networkConnectionSection, err := networksToConfig(d, vdc, vapp, vcdClient)
 			if err != nil {
-				return fmt.Errorf("unable to setup network configuration for update: %s", err)
+				return diag.Errorf("unable to setup network configuration for update: %s", err)
 			}
 			err = vm.UpdateNetworkConnectionSection(&networkConnectionSection)
 			if err != nil {
-				return fmt.Errorf("unable to update network configuration: %s", err)
+				return diag.Errorf("unable to update network configuration: %s", err)
 			}
 		}
 
@@ -1179,12 +1305,12 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 
 			task, err := vm.ToggleHardwareVirtualization(d.Get("expose_hardware_virtualization").(bool))
 			if err != nil {
-				return fmt.Errorf("error changing hardware assisted virtualization: %s", err)
+				return diag.Errorf("error changing hardware assisted virtualization: %s", err)
 			}
 
 			err = task.WaitTaskCompletion()
 			if err != nil {
-				return err
+				return diag.Errorf("%s", err)
 			}
 		}
 
@@ -1205,39 +1331,39 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 
 			_, err := vm.UpdateVmSpecSection(vmSpecSection, description)
 			if err != nil {
-				return fmt.Errorf("error changing VM spec section: %s", err)
+				return diag.Errorf("error changing VM spec section: %s", err)
 			}
 		}
 
 		if d.HasChange("cpu_hot_add_enabled") || d.HasChange("memory_hot_add_enabled") {
 			_, err := vm.UpdateVmCpuAndMemoryHotAdd(d.Get("cpu_hot_add_enabled").(bool), d.Get("memory_hot_add_enabled").(bool))
 			if err != nil {
-				return fmt.Errorf("error changing VM capabilities: %s", err)
+				return diag.Errorf("error changing VM capabilities: %s", err)
 			}
 		}
 
-		// we detach boot image if it's value change to empty.
+		// we detach boot image if its value change to empty.
 		bootImage := d.Get("boot_image")
 		if d.HasChange("boot_image") && bootImage.(string) == "" {
 			previousBootImageValue, _ := d.GetChange("boot_image")
 			previousCatalogName, _ := d.GetChange("catalog_name")
 			catalog, err := org.GetCatalogByName(previousCatalogName.(string), false)
 			if err != nil {
-				return fmt.Errorf("[VM Update] error finding catalog %s: %s", previousCatalogName, err)
+				return diag.Errorf("[VM Update] error finding catalog %s: %s", previousCatalogName, err)
 			}
 			result, err := catalog.GetMediaByName(previousBootImageValue.(string), false)
 			if err != nil {
-				return fmt.Errorf("[VM Update] error getting boot image %s : %s", previousBootImageValue, err)
+				return diag.Errorf("[VM Update] error getting boot image %s : %s", previousBootImageValue, err)
 			}
 
 			task, err := vm.HandleEjectMedia(org, previousCatalogName.(string), result.Media.Name)
 			if err != nil {
-				return fmt.Errorf("error: %#v", err)
+				return diag.Errorf("error: %#v", err)
 			}
 
 			err = task.WaitTaskCompletion(true)
 			if err != nil {
-				return fmt.Errorf("error: %#v", err)
+				return diag.Errorf("error: %#v", err)
 			}
 		}
 	}
@@ -1246,7 +1372,7 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 	if d.Get("power_on").(bool) {
 		vmStatus, err := vm.GetStatus()
 		if err != nil {
-			return fmt.Errorf("error getting VM status before ensuring it is powered on: %s", err)
+			return diag.Errorf("error getting VM status before ensuring it is powered on: %s", err)
 		}
 
 		// Simply power on if customization is not requested
@@ -1254,11 +1380,11 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 			log.Printf("[DEBUG] Powering on VM %s after update. Previous state %s", vm.VM.Name, vmStatus)
 			task, err := vm.PowerOn()
 			if err != nil {
-				return fmt.Errorf("error powering on: %s", err)
+				return diag.Errorf("error powering on: %s", err)
 			}
 			err = task.WaitTaskCompletion()
 			if err != nil {
-				return fmt.Errorf(errorCompletingTask, err)
+				return diag.Errorf(errorCompletingTask, err)
 			}
 		}
 
@@ -1271,23 +1397,23 @@ func resourceVcdVAppVmUpdateExecute(d *schema.ResourceData, meta interface{}, ex
 				log.Printf("[TRACE] VM %s is in state %s. Un-deploying", vm.VM.Name, vmStatus)
 				task, err := vm.Undeploy()
 				if err != nil {
-					return fmt.Errorf("error triggering undeploy for VM %s: %s", vm.VM.Name, err)
+					return diag.Errorf("error triggering undeploy for VM %s: %s", vm.VM.Name, err)
 				}
 				err = task.WaitTaskCompletion()
 				if err != nil {
-					return fmt.Errorf("error waiting for undeploy task for VM %s: %s", vm.VM.Name, err)
+					return diag.Errorf("error waiting for undeploy task for VM %s: %s", vm.VM.Name, err)
 				}
 			}
 
 			log.Printf("[TRACE] Powering on VM %s with forced customization", vm.VM.Name)
 			err = vm.PowerOnAndForceCustomization()
 			if err != nil {
-				return fmt.Errorf("failed powering on with customization: %s", err)
+				return diag.Errorf("failed powering on with customization: %s", err)
 			}
 		}
 	}
 	log.Printf("[DEBUG] [VM update] finished")
-	return genericVcdVmRead(d, meta, "update", vmType)
+	return genericVcdVmRead(ctx, d, meta, "update", vmType)
 }
 
 func getVmFromResource(d *schema.ResourceData, meta interface{}, vmType typeOfVm) (*VCDClient, *govcd.Org, *govcd.Vdc, *govcd.VApp, string, *govcd.VM, error) {
@@ -1404,13 +1530,13 @@ func attachDetachDisks(d *schema.ResourceData, vm govcd.VM, vdc *govcd.Vdc) erro
 	return nil
 }
 
-func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, vmType typeOfVm) error {
+func genericVcdVmRead(ctx context.Context, d *schema.ResourceData, meta interface{}, origin string, vmType typeOfVm) diag.Diagnostics {
 	log.Printf("[DEBUG] [VM read] started with origin %s", origin)
 	vcdClient := meta.(*VCDClient)
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
-		return fmt.Errorf("[VM read ]"+errorRetrievingOrgAndVdc, err)
+		return diag.Errorf("[VM read ]"+errorRetrievingOrgAndVdc, err)
 	}
 
 	isStandalone := false
@@ -1425,7 +1551,7 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 		identifier = d.Get("name").(string)
 	}
 	if identifier == "" {
-		return fmt.Errorf("[VM read] neither name or ID were set for this VM")
+		return diag.Errorf("[VM read] neither name or ID were set for this VM")
 	}
 	vappName := d.Get("vapp_name").(string)
 	if vappName == "" {
@@ -1433,7 +1559,7 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 		if govcd.IsNotFound(err) {
 			vmByName, listStr, errByName := getVmByName(vcdClient, vdc, identifier)
 			if errByName != nil && listStr != "" {
-				return fmt.Errorf("[VM read] error retrieving VM %s by name: %s\n%s\n%s", identifier, errByName, listStr, err)
+				return diag.Errorf("[VM read] error retrieving VM %s by name: %s\n%s\n%s", identifier, errByName, listStr, err)
 			}
 			vm = vmByName
 			err = errByName
@@ -1447,7 +1573,7 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 					"Please use 'vcd_vapp_vm' resource to specify vApp")
 				_ = d.Set("vapp_name", "")
 			}
-			return fmt.Errorf("[VM read] error finding vApp '%s': %s%s", vappName, err, additionalMessage)
+			return diag.Errorf("[VM read] error finding vApp '%s': %s%s", vappName, err, additionalMessage)
 		}
 		vm, err = vapp.GetVMByNameOrId(identifier, false)
 	}
@@ -1457,12 +1583,12 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 			d.SetId("")
 			return nil
 		}
-		return fmt.Errorf("[VM read] error getting VM %s : %s", identifier, err)
+		return diag.Errorf("[VM read] error getting VM %s : %s", identifier, err)
 	}
 	if vapp == nil {
 		vapp, err = vm.GetParentVApp()
 		if err != nil {
-			return fmt.Errorf("[VM read] error retrieving parent vApp for VM %s: %s", vm.VM.Name, err)
+			return diag.Errorf("[VM read] error retrieving parent vApp for VM %s: %s", vm.VM.Name, err)
 		}
 	}
 
@@ -1481,12 +1607,12 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 
 	networks, err := readNetworks(d, *vm, *vapp, vdc)
 	if err != nil {
-		return fmt.Errorf("[VM read] failed reading network details: %s", err)
+		return diag.Errorf("[VM read] failed reading network details: %s", err)
 	}
 
 	err = d.Set("network", networks)
 	if err != nil {
-		return err
+		return diag.Errorf("%s", err)
 	}
 
 	_ = d.Set("href", vm.VM.HREF)
@@ -1512,11 +1638,11 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 
 	metadata, err := vm.GetMetadata()
 	if err != nil {
-		return fmt.Errorf("[vm read] get metadata: %s", err)
+		return diag.Errorf("[vm read] get metadata: %s", err)
 	}
 	err = d.Set("metadata", getMetadataStruct(metadata.MetadataEntry))
 	if err != nil {
-		return fmt.Errorf("[VM read] set metadata: %s", err)
+		return diag.Errorf("[VM read] set metadata: %s", err)
 	}
 
 	if vm.VM.StorageProfile != nil {
@@ -1526,28 +1652,28 @@ func genericVcdVmRead(d *schema.ResourceData, meta interface{}, origin string, v
 	// update guest properties
 	guestProperties, err := vm.GetProductSectionList()
 	if err != nil {
-		return fmt.Errorf("[VM read] unable to read guest properties: %s", err)
+		return diag.Errorf("[VM read] unable to read guest properties: %s", err)
 	}
 
 	err = setGuestProperties(d, guestProperties)
 	if err != nil {
-		return fmt.Errorf("[VM read] unable to set guest properties in state: %s", err)
+		return diag.Errorf("[VM read] unable to set guest properties in state: %s", err)
 	}
 
 	err = updateStateOfInternalDisks(d, *vm)
 	if err != nil {
 		d.Set("internal_disk", nil)
-		return fmt.Errorf("[VM read] error reading internal disks : %s", err)
+		return diag.Errorf("[VM read] error reading internal disks : %s", err)
 	}
 
 	err = updateStateOfAttachedDisks(d, *vm, vdc)
 	if err != nil {
 		d.Set("disk", nil)
-		return fmt.Errorf("[VM read] error reading attached disks : %s", err)
+		return diag.Errorf("[VM read] error reading attached disks : %s", err)
 	}
 
 	if err := setGuestCustomizationData(d, vm); err != nil {
-		return fmt.Errorf("error storing customzation block: %s", err)
+		return diag.Errorf("error storing customzation block: %s", err)
 	}
 
 	if vm.VM.VmSpecSection != nil && vm.VM.VmSpecSection.HardwareVersion != nil && vm.VM.VmSpecSection.HardwareVersion.Value != "" {
@@ -1716,7 +1842,7 @@ func getMatchedDisk(internalDiskProvidedConfig map[string]interface{}, diskSetti
 	return nil
 }
 
-func resourceVcdVAppVmDelete(d *schema.ResourceData, meta interface{}) error {
+func resourceVcdVAppVmDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	log.Printf("[DEBUG] [VM delete] started")
 
 	vcdClient := meta.(*VCDClient)
@@ -1726,14 +1852,14 @@ func resourceVcdVAppVmDelete(d *schema.ResourceData, meta interface{}) error {
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
-		return fmt.Errorf(errorRetrievingOrgAndVdc, err)
+		return diag.Errorf(errorRetrievingOrgAndVdc, err)
 	}
 
 	vappName := d.Get("vapp_name").(string)
 	vapp, err := vdc.GetVAppByName(vappName, false)
 
 	if err != nil {
-		return fmt.Errorf("[VM delete] error finding vApp '%s': %s", vappName, err)
+		return diag.Errorf("[VM delete] error finding vApp '%s': %s", vappName, err)
 	}
 
 	identifier := d.Id()
@@ -1741,23 +1867,27 @@ func resourceVcdVAppVmDelete(d *schema.ResourceData, meta interface{}) error {
 		identifier = d.Get("name").(string)
 	}
 	if identifier == "" {
-		return fmt.Errorf("[VM delete] neither ID or name provided")
+		return diag.Errorf("[VM delete] neither ID or name provided")
 	}
 	vm, err := vapp.GetVMByNameOrId(identifier, false)
 
 	if err != nil {
-		return fmt.Errorf("[VM delete] error getting VM %s : %s", identifier, err)
+		return diag.Errorf("[VM delete] error getting VM %s : %s", identifier, err)
 	}
 
 	// If it is a standalone VM, we remove it in one go
 	if vapp.VApp.IsAutoNature {
-		return vm.Delete()
+		err = vm.Delete()
+		if err != nil {
+			return diag.Errorf("%s", err)
+		}
+		return nil
 	}
 	util.Logger.Printf("[VM delete] vApp before deletion %# v", pretty.Formatter(vapp.VApp))
 	util.Logger.Printf("[VM delete] VM before deletion %# v", pretty.Formatter(vm.VM))
 	deployed, err := vm.IsDeployed()
 	if err != nil {
-		return fmt.Errorf("error getting VM deploy status: %s", err)
+		return diag.Errorf("error getting VM deploy status: %s", err)
 	}
 
 	log.Printf("[TRACE] VM deploy Status: %t", deployed)
@@ -1765,12 +1895,12 @@ func resourceVcdVAppVmDelete(d *schema.ResourceData, meta interface{}) error {
 		log.Printf("[TRACE] Undeploying VM: %s", vm.VM.Name)
 		task, err := vm.Undeploy()
 		if err != nil {
-			return fmt.Errorf("error Undeploying: %s", err)
+			return diag.Errorf("error Undeploying: %s", err)
 		}
 
 		err = task.WaitTaskCompletion()
 		if err != nil {
-			return fmt.Errorf("error Undeploying VM: %s", err)
+			return diag.Errorf("error Undeploying VM: %s", err)
 		}
 	}
 
@@ -1780,24 +1910,24 @@ func resourceVcdVAppVmDelete(d *schema.ResourceData, meta interface{}) error {
 	for _, existingDiskHref := range existingDisks {
 		disk, err := vdc.GetDiskByHref(existingDiskHref)
 		if err != nil {
-			return fmt.Errorf("did not find disk `%s`: %s", existingDiskHref, err)
+			return diag.Errorf("did not find disk `%s`: %s", existingDiskHref, err)
 		}
 
 		attachParams := &types.DiskAttachOrDetachParams{Disk: &types.Reference{HREF: disk.Disk.HREF}}
 		task, err := vm.DetachDisk(attachParams)
 		if err != nil {
-			return fmt.Errorf("error detaching disk `%s`: %s", existingDiskHref, err)
+			return diag.Errorf("error detaching disk `%s`: %s", existingDiskHref, err)
 		}
 		err = task.WaitTaskCompletion()
 		if err != nil {
-			return fmt.Errorf("error waiting detaching disk task to finish`%s`: %s", existingDiskHref, err)
+			return diag.Errorf("error waiting detaching disk task to finish`%s`: %s", existingDiskHref, err)
 		}
 	}
 
 	log.Printf("[TRACE] Removing VM: %s", vm.VM.Name)
 	err = vapp.RemoveVM(*vm)
 	if err != nil {
-		return fmt.Errorf("error deleting: %s", err)
+		return diag.Errorf("error deleting: %s", err)
 	}
 	log.Printf("[DEBUG] [VM delete] finished")
 	return nil
@@ -2135,7 +2265,7 @@ func setGuestProperties(d *schema.ResourceData, properties *types.ProductSection
 // The VM identifier can be either the VM name or its ID
 // If we are dealing with standalone VMs, the name can retrieve duplicates. When that happens, the import fails
 // and a list of VM information (ID, guest OS, network, IP) is returned
-func resourceVcdVappVmImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func resourceVcdVappVmImport(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	resourceURI := strings.Split(d.Id(), ImportSeparator)
 	vcdClient := meta.(*VCDClient)
 
@@ -2382,14 +2512,18 @@ func setGuestCustomizationData(d *schema.ResourceData, vm *govcd.VM) error {
 	return nil
 }
 
-func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vdc *govcd.Vdc, vappName string) (*govcd.VM, error) {
+func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vdc *govcd.Vdc, vappName, vappId string) (*govcd.VM, error) {
 	util.Logger.Printf("[TRACE] Creating empty VM: %s", d.Get("name").(string))
 
 	var err error
 	var vapp *govcd.VApp
 
-	if vappName != "" {
-		vapp, err = vdc.GetVAppByName(vappName, false)
+	if vappName != "" || vappId != "" {
+		vappIdentifier := vappName
+		if vappIdentifier == "" {
+			vappIdentifier = vappId
+		}
+		vapp, err = vdc.GetVAppByNameOrId(vappIdentifier, false)
 		if err != nil {
 			return nil, err
 		}
@@ -2417,23 +2551,37 @@ func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vd
 	}
 
 	var bootImage *types.Media
-	if bootImageName, ok := d.GetOk("boot_image"); ok {
-		var catalogName interface{}
-		if catalogName, ok = d.GetOk("catalog_name"); !ok {
-			return nil, fmt.Errorf("`catalog_name` is required when creating empty VM with boot_image")
-		}
-		catalog, err := org.GetCatalogByName(catalogName.(string), false)
+	if bootImageId, ok := d.GetOk("boot_image_id"); ok {
+		media, err := vcdClient.Client.GetMediaById(bootImageId.(string))
 		if err != nil {
-			return nil, fmt.Errorf("error finding catalog %s: %s", catalogName, err)
+			return nil, fmt.Errorf("[VM creation] error getting boot image %s : %s", bootImageId, err)
 		}
-		result, err := catalog.GetMediaByName(bootImageName.(string), false)
-		if err != nil {
-			return nil, fmt.Errorf("[VM creation] error getting boot image %s : %s", bootImageName, err)
+		bootImage = &types.Media{
+			HREF: media.Media.HREF,
+			ID:   media.Media.ID,
+			Name: media.Media.Name,
 		}
-
-		bootImage = &types.Media{HREF: result.Media.HREF, Name: result.Media.Name, ID: result.Media.ID}
+		d.Set("boot_image", media.Media.Name)
 	} else {
-		bootImage = nil
+		if bootImageName, ok := d.GetOk("boot_image"); ok {
+			var catalogName interface{}
+			if catalogName, ok = d.GetOk("catalog_name"); !ok {
+				return nil, fmt.Errorf("`catalog_name` is required when creating empty VM with boot_image")
+			}
+			catalog, err := org.GetCatalogByName(catalogName.(string), false)
+			if err != nil {
+				return nil, fmt.Errorf("error finding catalog %s: %s", catalogName, err)
+			}
+			result, err := catalog.GetMediaByName(bootImageName.(string), false)
+			if err != nil {
+				return nil, fmt.Errorf("[VM creation] error getting boot image %s : %s", bootImageName, err)
+			}
+
+			bootImage = &types.Media{HREF: result.Media.HREF, Name: result.Media.Name, ID: result.Media.ID}
+			d.Set("boot_image_id", result.Media.ID)
+		} else {
+			bootImage = nil
+		}
 	}
 
 	customizationSection := &types.GuestCustomizationSection{}
@@ -2499,7 +2647,7 @@ func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vd
 			Name: bootImage.Name,
 		}
 	}
-	if vappName == "" {
+	if vappName == "" && vappId == "" {
 		params := types.CreateVmParams{
 			Name:        vmName,
 			PowerOn:     false,
@@ -2519,11 +2667,31 @@ func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vd
 			return nil, err
 		}
 	} else {
-		util.Logger.Printf("[VM create - add empty VM] recomposeVAppParamsForEmptyVm %# v", pretty.Formatter(recomposeVAppParamsForEmptyVm))
-		newVm, err = vapp.AddEmptyVm(recomposeVAppParamsForEmptyVm)
-		if err != nil {
-			d.SetId("")
-			return nil, fmt.Errorf("[VM creation] error creating VM %s : %s", vmName, err)
+		// Collect info to create parallel VM here
+		if vappId != "" {
+			creation := &types.VmType{
+				Name:                      vmName,
+				Description:               d.Get("description").(string),
+				GuestCustomizationSection: recomposeVAppParamsForEmptyVm.CreateItem.GuestCustomizationSection,
+				NetworkConnectionSection:  recomposeVAppParamsForEmptyVm.CreateItem.NetworkConnectionSection,
+				VmSpecSection:             recomposeVAppParamsForEmptyVm.CreateItem.VmSpecSection,
+				StorageProfile:            nil,
+				ComputePolicy:             recomposeVAppParamsForEmptyVm.CreateItem.ComputePolicy,
+			}
+			if mediaReference != nil {
+				creation.BootImage = &types.Media{HREF: mediaReference.HREF, Name: mediaReference.Name, Type: mediaReference.Type, ID: mediaReference.ID}
+			}
+			_, err := govcd.CreateParallelVm(vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
+			if err != nil {
+				return nil, fmt.Errorf("error creating parallel VM: %s", err)
+			}
+		} else {
+			util.Logger.Printf("[VM create - add empty VM] recomposeVAppParamsForEmptyVm %# v", pretty.Formatter(recomposeVAppParamsForEmptyVm))
+			newVm, err = vapp.AddEmptyVm(recomposeVAppParamsForEmptyVm)
+			if err != nil {
+				d.SetId("")
+				return nil, fmt.Errorf("[VM creation] error creating VM %s : %s", vmName, err)
+			}
 		}
 	}
 

@@ -138,8 +138,7 @@ var globalResourceMap = map[string]*schema.Resource{
 	"vcd_nsxt_app_port_profile": resourceVcdNsxtAppPortProfile(),       // 3.3
 	"vcd_nsxt_nat_rule":         resourceVcdNsxtNatRule(),              // 3.3
 	"vcd_nsxt_ipsec_vpn_tunnel": resourceVcdNsxtIpSecVpnTunnel(),       // 3.3
-	"vcd_vapp_vm_v2":            resourceVcdVappVmV2(),                 // 3.4
-	"vcd_vapp_v2":               resourceVcdVAppV2(),                   // 3.4
+	"vcd_vapp_vm_v2":            resourceVcdVAppVmV2(),                 // 3.4
 }
 
 // Provider returns a terraform.ResourceProvider.

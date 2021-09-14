@@ -2,8 +2,10 @@ package vcd
 
 //lint:file-ignore SA1019 ignore deprecated functions
 import (
+	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
@@ -337,11 +339,11 @@ func vcdVmDS(vmType typeOfVm) map[string]*schema.Schema {
 
 func datasourceVcdVAppVm() *schema.Resource {
 	return &schema.Resource{
-		Read:   datasourceVcdVAppVmRead,
-		Schema: vcdVmDS(vappVmType),
+		ReadContext: datasourceVcdVAppVmRead,
+		Schema:      vcdVmDS(vappVmType),
 	}
 }
 
-func datasourceVcdVAppVmRead(d *schema.ResourceData, meta interface{}) error {
-	return genericVcdVmRead(d, meta, "datasource", vappVmType)
+func datasourceVcdVAppVmRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return genericVcdVmRead(ctx, d, meta, "datasource", vappVmType)
 }
