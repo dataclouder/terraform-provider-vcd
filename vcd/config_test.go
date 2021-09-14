@@ -1,3 +1,4 @@
+//go:build api || functional || catalog || vapp || network || extnetwork || org || query || vm || vdc || gateway || disk || binary || lb || lbServiceMonitor || lbServerPool || lbAppProfile || lbAppRule || lbVirtualServer || access_control || user || standaloneVm || search || auth || nsxt || role || ALL
 // +build api functional catalog vapp network extnetwork org query vm vdc gateway disk binary lb lbServiceMonitor lbServerPool lbAppProfile lbAppRule lbVirtualServer access_control user standaloneVm search auth nsxt role ALL
 
 package vcd
@@ -241,7 +242,7 @@ var (
 	testDistributedNetworks = false
 
 	// runTestRunListFileLock regulates access to the list of run tests
-	runTestRunListFileLock = newMutexKVSilent()
+	runTestRunListFileLock = util.NewMutexKVSilent()
 )
 
 const (
@@ -1480,8 +1481,8 @@ func isTestInFile(testName, fileType string) bool {
 	if fileName == "" {
 		return false
 	}
-	runTestRunListFileLock.kvLock(fileName)
-	defer runTestRunListFileLock.kvUnlock(fileName)
+	runTestRunListFileLock.Lock(fileName)
+	defer runTestRunListFileLock.Unlock(fileName)
 	if !fileExists(fileName) {
 		return false
 	}
@@ -1506,8 +1507,8 @@ func isTestInFile(testName, fileType string) bool {
 // a test again after running with -vcd-pre-post-checks
 func removeTestRunList(fileType string) error {
 	fileName := getTestListFile(fileType)
-	runTestRunListFileLock.kvLock(fileName)
-	defer runTestRunListFileLock.kvUnlock(fileName)
+	runTestRunListFileLock.Lock(fileName)
+	defer runTestRunListFileLock.Unlock(fileName)
 	if fileExists(vcdSkipAllFile) {
 		err := os.Remove(vcdSkipAllFile)
 		if err != nil {
@@ -1527,8 +1528,8 @@ func addToTestRunList(testName, fileType string) error {
 	if fileName == "" {
 		return nil
 	}
-	runTestRunListFileLock.kvLock(fileName)
-	defer runTestRunListFileLock.kvUnlock(fileName)
+	runTestRunListFileLock.Lock(fileName)
+	defer runTestRunListFileLock.Unlock(fileName)
 
 	var file *os.File
 	var err error
