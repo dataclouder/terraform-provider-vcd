@@ -70,8 +70,8 @@ func resourceVcdMediaInsert(d *schema.ResourceData, meta interface{}) error {
 
 	vcdClient := meta.(*VCDClient)
 
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	vm, org, err := getVM(d, meta)
 	if err != nil || org == nil {
@@ -122,8 +122,8 @@ func resourceVcdMediaEject(d *schema.ResourceData, meta interface{}) error {
 
 	vcdClient := meta.(*VCDClient)
 
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	vm, org, err := getVM(d, meta)
 	if err != nil {

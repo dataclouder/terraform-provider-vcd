@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -558,22 +559,23 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 
 	vappName := d.Get("vapp_name").(string)
 	vappId := d.Get("vapp_id").(string)
-	concurrentVms := d.Get("concurrent_vms").(int)
+	if concurrentVms, ok := d.GetOk("concurrent_vms"); ok {
+		if concurrentVms.(int) == 0 && vmType == vappVmV2Type {
+			return diag.Errorf("number of concurrent VMs is mandatory for this VM type")
+		}
+	}
 	if vappName == "" && vmType == vappVmType {
 		return diag.Errorf("vApp name is mandatory for this VM type")
 	}
 	if vappId == "" && vmType == vappVmV2Type {
 		return diag.Errorf("vApp ID is mandatory for this VM type")
 	}
-	if concurrentVms == 0 && vmType == vappVmV2Type {
-		return diag.Errorf("number of concurrent VMs is mandatory for this VM type")
-	}
 	if vappName != "" && vmType == standaloneVmType {
 		return diag.Errorf("vApp name must not be set for a standalone VM")
 	}
-	if (vappName != "" && vmType == vappVmType) || (vappId != "" && vmType == vappVmV2Type) {
-		vcdClient.lockParentVapp(d)
-		defer vcdClient.unLockParentVapp(d)
+	if vappName != "" && vmType == vappVmType {
+		vcdClient.lockParentVapp(d, "vapp_name")
+		defer vcdClient.unLockParentVapp(d, "vapp_name")
 	}
 
 	org, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
@@ -585,14 +587,14 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 	templateName := d.Get("template_name").(string)
 	templateId := d.Get("catalog_item_id").(string)
 	vmName := d.Get("name").(string)
+	computerName := d.Get("computer_name").(string)
+	if computerName == "" {
+		computerName = vmName
+	}
 	description := d.Get("description").(string)
 	powerOn := d.Get("power_on").(bool)
 
 	var vapp *govcd.VApp
-
-	if vmType == vappVmV2Type {
-
-	}
 
 	//create not empty VM - use provided template
 	if (catalogName != "" && templateName != "") || templateId != "" {
@@ -600,38 +602,6 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 		if err != nil {
 			return diag.Errorf("error finding vApp template: %s", err)
 		}
-		/*
-			catalog, err := org.GetCatalogByName(catalogName, false)
-			if err != nil {
-				return diag.Errorf("error finding catalog %s: %s", catalogName, err)
-			}
-
-			var vappTemplate govcd.VAppTemplate
-			if vmNameInTemplate, ok := d.GetOk("vm_name_in_template"); ok {
-				vmInTemplateRecord, err := vdc.QueryVappVmTemplate(catalogName, templateName, vmNameInTemplate.(string))
-				if err != nil {
-					return diag.Errorf("error quering VM template %s: %s", vmNameInTemplate, err)
-				}
-				util.Logger.Printf("[VM create] vmInTemplateRecord %# v", pretty.Formatter(vmInTemplateRecord))
-				returnedVappTemplate, err := catalog.GetVappTemplateByHref(vmInTemplateRecord.HREF)
-				if err != nil {
-					return diag.Errorf("error querying VM template %s: %s", vmNameInTemplate, err)
-				}
-				util.Logger.Printf("[VM create] returnedVappTemplate %#v", pretty.Formatter(returnedVappTemplate))
-				vappTemplate = *returnedVappTemplate
-			} else {
-				catalogItem, err := catalog.GetCatalogItemByName(templateName, false)
-				if err != nil {
-					return diag.Errorf("error finding catalog item %s: %s", templateName, err)
-				}
-				vappTemplate, err = catalogItem.GetVAppTemplate()
-				if err != nil {
-					return diag.Errorf("[VM create] error finding VAppTemplate %s: %s", templateName, err)
-				}
-
-			}
-
-		*/
 		acceptEulas := d.Get("accept_all_eulas").(bool)
 
 		vappIdentifier := vappName
@@ -686,7 +656,7 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 
 		var vm *govcd.VM
 
-		if vappName == "" {
+		if vappName == "" && vappId == "" {
 			// Build a standalone VM
 			if vmComputePolicy != nil && vcdClient.Client.APIVCDMaxVersionIs("< 33.0") {
 				util.Logger.Printf("[Warning] compute policy is ignored because VCD version doesn't support it")
@@ -728,19 +698,39 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 			util.Logger.Printf("[VM create] vApp after creation %# v", pretty.Formatter(vapp.VApp))
 			_ = d.Set("vapp_name", vapp.VApp.Name)
 		} else {
+			var vmTemplate *types.VAppTemplate
 			if vappId != "" {
 				// Build a parallel VM
+				vmNameInTemplate := d.Get("vm_name_in_template").(string)
+				if vmNameInTemplate != "" {
+					for _, innerVm := range vappTemplate.VAppTemplate.Children.VM {
+						if innerVm.Name == vmNameInTemplate {
+							vmTemplate = innerVm
+							break
+						}
+					}
+				} else {
+					vmTemplate = vappTemplate.VAppTemplate.Children.VM[0]
+				}
+				if vmTemplate == nil {
+					return diag.Errorf("error finding inner VM in template")
+				}
 				creation := &types.Reference{
-					HREF: vappTemplate.VAppTemplate.HREF,
-					ID:   vappTemplate.VAppTemplate.ID,
-					Type: vappTemplate.VAppTemplate.Type,
+					HREF: vmTemplate.HREF,
+					ID:   vmTemplate.ID,
+					Type: vmTemplate.Type,
 					Name: vmName,
 				}
-				_, err := govcd.CreateParallelVm(vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
+				_, err := govcd.CreateParallelVm(&vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
 				if err != nil {
 					return diag.Errorf("error creating parallel VM: %s", err)
 				}
 
+				vm, err = vapp.GetVMByName(vmName, true)
+				if err != nil {
+					d.SetId("")
+					return diag.Errorf("[VM creation] error getting parallel VM %s : %s", vmName, err)
+				}
 			} else {
 				task, err := vapp.AddNewVMWithComputePolicy(vmName, vappTemplate, &networkConnectionSection, storageProfilePtr, sizingPolicy, acceptEulas)
 				if err != nil {
@@ -774,7 +764,15 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 		d.SetId(vm.VM.ID)
 		_ = d.Set("vm_type", computedVmType)
 		_ = d.Set("vapp_id", vapp.VApp.ID)
+		_ = d.Set("vapp_name", vapp.VApp.Name)
 
+		if vmType == vappVmV2Type && os.Getenv("SKIP_LOCK") == "" {
+			vcdClient.lockParentVapp(d, "vapp_id")
+			defer func() {
+				vcdClient.unLockParentVapp(d, "vapp_id")
+			}()
+		}
+		util.Logger.Printf("[START LOCK MATERIAL]")
 		err = handleExposeHardwareVirtualization(d, vm)
 		if err != nil {
 			return diag.Errorf("%s", err)
@@ -836,10 +834,11 @@ func genericResourceVmCreate(ctx context.Context, d *schema.ResourceData, meta i
 		}
 		util.Logger.Printf("[VM create] vApp after creation %# v", pretty.Formatter(vapp.VApp))
 		_ = d.Set("vapp_name", vapp.VApp.Name)
+		log.Printf("[DEBUG] [VM create] '%s' redirected to Read ", vmName)
 		return genericVcdVmRead(ctx, d, meta, "create", vmType)
 	}
 
-	log.Printf("[DEBUG] [VM create] finished")
+	log.Printf("[DEBUG] [VM create] '%s' finished", vmName)
 	return nil
 }
 
@@ -986,14 +985,14 @@ func genericResourceVcdVmUpdate(ctx context.Context, d *schema.ResourceData, met
 	log.Printf("[DEBUG] [VM update] started with lock")
 	vcdClient := meta.(*VCDClient)
 
-	// When there is more then one VM in a vApp Terraform will try to parallelise their creation.
+	// When there is more than one VM in a vApp Terraform will try to parallelise their creation.
 	// However, vApp throws errors when simultaneous requests are executed.
 	// To avoid them, below block is using mutex as a workaround,
-	// so that the one vApp VMs are created not in parallelisation.
+	// so that each vApp VM is updated sequentially
 
-	if vmType == vappVmType {
-		vcdClient.lockParentVapp(d)
-		defer vcdClient.unLockParentVapp(d)
+	if vmType == vappVmType || vmType == vappVmV2Type {
+		vcdClient.lockParentVapp(d, "vapp_name")
+		defer vcdClient.unLockParentVapp(d, "vapp_name")
 	}
 
 	// Exit early only if "network_dhcp_wait_seconds" is changed because this field only supports
@@ -1425,7 +1424,12 @@ func getVmFromResource(d *schema.ResourceData, meta interface{}, vmType typeOfVm
 	}
 
 	vappName := d.Get("vapp_name").(string)
-	vapp, err := vdc.GetVAppByName(vappName, false)
+	vappId := d.Get("vapp_id").(string)
+	vappIdentifier := vappName
+	if vappIdentifier == "" {
+		vappIdentifier = vappId
+	}
+	vapp, err := vdc.GetVAppByNameOrId(vappIdentifier, false)
 
 	if err != nil {
 		additionalMessage := ""
@@ -1847,8 +1851,8 @@ func resourceVcdVAppVmDelete(ctx context.Context, d *schema.ResourceData, meta i
 
 	vcdClient := meta.(*VCDClient)
 
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
@@ -1856,7 +1860,12 @@ func resourceVcdVAppVmDelete(ctx context.Context, d *schema.ResourceData, meta i
 	}
 
 	vappName := d.Get("vapp_name").(string)
-	vapp, err := vdc.GetVAppByName(vappName, false)
+	vappId := d.Get("vapp_id").(string)
+	vappIdentifier := vappName
+	if vappIdentifier == "" {
+		vappIdentifier = vappId
+	}
+	vapp, err := vdc.GetVAppByNameOrId(vappIdentifier, false)
 
 	if err != nil {
 		return diag.Errorf("[VM delete] error finding vApp '%s': %s", vappName, err)
@@ -2681,9 +2690,13 @@ func addEmptyVm(d *schema.ResourceData, vcdClient *VCDClient, org *govcd.Org, vd
 			if mediaReference != nil {
 				creation.BootImage = &types.Media{HREF: mediaReference.HREF, Name: mediaReference.Name, Type: mediaReference.Type, ID: mediaReference.ID}
 			}
-			_, err := govcd.CreateParallelVm(vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
+			_, err := govcd.CreateParallelVm(&vcdClient.Client, vapp.VApp.HREF, vmName, creation, d.Get("concurrent_vms").(int))
 			if err != nil {
-				return nil, fmt.Errorf("error creating parallel VM: %s", err)
+				return nil, fmt.Errorf("error creating parallel VM %s: %s", vmName, err)
+			}
+			newVm, err = vapp.GetVMByName(vmName, true)
+			if err != nil {
+				return nil, fmt.Errorf("error retrieving parallel VM %s: %s", vmName, err)
 			}
 		} else {
 			util.Logger.Printf("[VM create - add empty VM] recomposeVAppParamsForEmptyVm %# v", pretty.Formatter(recomposeVAppParamsForEmptyVm))

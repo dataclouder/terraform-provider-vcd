@@ -2,11 +2,12 @@ package vcd
 
 import (
 	"fmt"
+	"log"
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/vmware/go-vcloud-director/v2/govcd"
 	"github.com/vmware/go-vcloud-director/v2/types/v56"
-	"log"
-	"strings"
 )
 
 func resourceVcdVappOrgNetwork() *schema.Resource {
@@ -63,8 +64,8 @@ func resourceVcdVappOrgNetwork() *schema.Resource {
 
 func resourceVappOrgNetworkCreate(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
@@ -175,8 +176,8 @@ func genericVappOrgNetworkRead(d *schema.ResourceData, meta interface{}, origin 
 
 func resourceVappOrgNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
@@ -204,8 +205,8 @@ func resourceVappOrgNetworkUpdate(d *schema.ResourceData, meta interface{}) erro
 
 func resourceVappOrgNetworkDelete(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
-func TestAccVcdVAppVmV2_Basic(t *testing.T) {
+func TestAccVcdVAppVmV1_Basic(t *testing.T) {
 	preTestChecks(t)
 	var vappName = t.Name() + "-vapp"
 	var vmName = t.Name() + "-vm"
@@ -25,10 +25,10 @@ func TestAccVcdVAppVmV2_Basic(t *testing.T) {
 		"VappName":     vappName,
 		"VmName":       vmName,
 		"ComputerName": "compname",
-		"Tags":         "vapp vm vmv2",
+		"Tags":         "vapp vm",
 	}
 
-	configText := templateFill(testAccCheckVcdVAppVmV2_basic, params)
+	configText := templateFill(testAccCheckVcdVAppVmV1_basic, params)
 	if vcdShortTest {
 		t.Skip(acceptanceTestsSkipped)
 		return
@@ -43,25 +43,25 @@ func TestAccVcdVAppVmV2_Basic(t *testing.T) {
 			resource.TestStep{
 				Config: configText,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckVcdVAppVmExists(vappName, vmName+"1", "vcd_vapp_vm_v2."+vmName+"1", nil, nil),
-					testAccCheckVcdVAppVmExists(vappName, vmName+"2", "vcd_vapp_vm_v2."+vmName+"2", nil, nil),
-					testAccCheckVcdVAppVmExists(vappName, vmName+"3", "vcd_vapp_vm_v2."+vmName+"3", nil, nil),
+					testAccCheckVcdVAppVmExists(vappName, vmName+"1", "vcd_vapp_vm."+vmName+"1", nil, nil),
+					testAccCheckVcdVAppVmExists(vappName, vmName+"2", "vcd_vapp_vm."+vmName+"2", nil, nil),
+					testAccCheckVcdVAppVmExists(vappName, vmName+"3", "vcd_vapp_vm."+vmName+"3", nil, nil),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"1", "name", vmName+"1"),
+						"vcd_vapp_vm."+vmName+"1", "name", vmName+"1"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"2", "name", vmName+"2"),
+						"vcd_vapp_vm."+vmName+"2", "name", vmName+"2"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"3", "name", vmName+"3"),
+						"vcd_vapp_vm."+vmName+"3", "name", vmName+"3"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"1", "computer_name", "compname1"),
+						"vcd_vapp_vm."+vmName+"1", "computer_name", "compname1"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"2", "computer_name", "compname2"),
+						"vcd_vapp_vm."+vmName+"2", "computer_name", "compname2"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm_v2."+vmName+"3", "computer_name", "compname3"),
+						"vcd_vapp_vm."+vmName+"3", "computer_name", "compname3"),
 				),
 			},
 			resource.TestStep{
-				ResourceName:      "vcd_vapp_vm_v2." + vmName + "1",
+				ResourceName:      "vcd_vapp_vm." + vmName + "1",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: importStateIdVappObject(testConfig, vappName, vmName+"1"),
@@ -75,39 +75,22 @@ func TestAccVcdVAppVmV2_Basic(t *testing.T) {
 	postTestChecks(t)
 }
 
-const testAccCheckVcdVAppVmV2_basic = `
-
-locals {
-  concurrent_vms = 3
-}
+const testAccCheckVcdVAppVmV1_basic = `
 
 resource "vcd_vapp" "{{.VappName}}" {
-  name     = "{{.VappName}}"
-  org      = "{{.Org}}"
-  vdc      = "{{.Vdc}}"
-  power_on = true
+  name = "{{.VappName}}"
+  org  = "{{.Org}}"
+  vdc  = "{{.Vdc}}"
 }
 
-
-data "vcd_catalog_item" "main_item" {
-	catalog = "{{.Catalog}}"
-    name    = "{{.CatalogItem}}"
-}
-
-data "vcd_catalog_media" "media_item" {
-	catalog = "{{.Catalog}}"
-    name    = "{{.MediaItem}}"
-}
-
-resource "vcd_vapp_vm_v2" "{{.VmName}}1" {
+resource "vcd_vapp_vm" "{{.VmName}}1" {
   org             = "{{.Org}}"
   vdc             = "{{.Vdc}}"
-  vapp_id         = vcd_vapp.{{.VappName}}.id
+  vapp_name       = vcd_vapp.{{.VappName}}.name
   name            = "{{.VmName}}1"
   computer_name   = "{{.ComputerName}}1"
-  power_on        = true
-  catalog_item_id = data.vcd_catalog_item.main_item.id
-  concurrent_vms  = local.concurrent_vms
+  catalog_name    = "{{.Catalog}}"
+  template_name  = "{{.CatalogItem}}"
   memory          = 1024
   cpus            = 2
   cpu_cores       = 1
@@ -121,15 +104,14 @@ resource "vcd_vapp_vm_v2" "{{.VmName}}1" {
   }
 }
 
-resource "vcd_vapp_vm_v2" "{{.VmName}}2" {
+resource "vcd_vapp_vm" "{{.VmName}}2" {
   org = "{{.Org}}"
   vdc = "{{.Vdc}}"
 
-  power_on = true
+  power_on = false
 
-  vapp_id        = vcd_vapp.{{.VappName}}.id
+  vapp_name       = vcd_vapp.{{.VappName}}.name
   description    = "test empty VM"
-  concurrent_vms = local.concurrent_vms
   name           = "{{.VmName}}2"
   memory         = 512
   cpus           = 2
@@ -137,7 +119,8 @@ resource "vcd_vapp_vm_v2" "{{.VmName}}2" {
   
   os_type                        = "sles11_64Guest"
   hardware_version               = "vmx-13"
-  boot_image_id                  = data.vcd_catalog_media.media_item.id
+  catalog_name                   = "{{.Catalog}}"
+  boot_image                     = "{{.MediaItem}}"
   expose_hardware_virtualization = true
   computer_name                  = "{{.ComputerName}}2"
 
@@ -146,18 +129,17 @@ resource "vcd_vapp_vm_v2" "{{.VmName}}2" {
 
 }
 
-resource "vcd_vapp_vm_v2" "{{.VmName}}3" {
+resource "vcd_vapp_vm" "{{.VmName}}3" {
   org             = "{{.Org}}"
   vdc             = "{{.Vdc}}"
-  vapp_id         = vcd_vapp.{{.VappName}}.id
+  vapp_name       = vcd_vapp.{{.VappName}}.name
   name            = "{{.VmName}}3"
   computer_name   = "{{.ComputerName}}3"
-  catalog_item_id = data.vcd_catalog_item.main_item.id
-  concurrent_vms  = local.concurrent_vms
+  catalog_name    = "{{.Catalog}}"
+  template_name   = "{{.CatalogItem}}"
   memory          = 1024
   cpus            = 2
   cpu_cores       = 1
-  power_on        = true
   network {
      adapter_type       = "VMXNET3"
      connected          = false

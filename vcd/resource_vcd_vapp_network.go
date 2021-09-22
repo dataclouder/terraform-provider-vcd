@@ -159,8 +159,8 @@ func resourceVcdVappNetwork() *schema.Resource {
 
 func resourceVappNetworkCreate(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
@@ -359,8 +359,8 @@ func genericVappNetworkRead(d *schema.ResourceData, meta interface{}, origin str
 
 func resourceVappNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {
@@ -415,8 +415,8 @@ func resourceVappNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 
 func resourceVappNetworkDelete(d *schema.ResourceData, meta interface{}) error {
 	vcdClient := meta.(*VCDClient)
-	vcdClient.lockParentVapp(d)
-	defer vcdClient.unLockParentVapp(d)
+	vcdClient.lockParentVapp(d, "vapp_name")
+	defer vcdClient.unLockParentVapp(d, "vapp_name")
 
 	_, vdc, err := vcdClient.GetOrgAndVdcFromResource(d)
 	if err != nil {

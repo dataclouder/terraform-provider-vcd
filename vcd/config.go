@@ -197,21 +197,27 @@ func (cli *VCDClient) unLockParentVappWithName(d *schema.ResourceData, vappName 
 
 // function lockParentVapp locks using vapp_name name existing in resource parameters.
 // Parent means the resource belongs to the vApp being locked
-func (cli *VCDClient) lockParentVapp(d *schema.ResourceData) {
-	vappName := d.Get("vapp_name").(string)
-	if vappName == "" {
-		panic("vApp name not found")
+func (cli *VCDClient) lockParentVapp(d *schema.ResourceData, fieldName string) {
+	if fieldName == "" {
+		fieldName = "vapp_name"
 	}
-	key := fmt.Sprintf("org:%s|vdc:%s|vapp:%s", cli.getOrgName(d), cli.getVdcName(d), vappName)
+	vappIdentifier := d.Get(fieldName).(string)
+	if vappIdentifier == "" {
+		panic(fmt.Sprintf("vApp identifier not found for entity %s - %s ", d.Get("name"), util.FuncNameCallStack()))
+	}
+	key := fmt.Sprintf("org:%s|vdc:%s|vapp:%s", cli.getOrgName(d), cli.getVdcName(d), vappIdentifier)
 	vcdMutexKV.Lock(key)
 }
 
-func (cli *VCDClient) unLockParentVapp(d *schema.ResourceData) {
-	vappName := d.Get("vapp_name").(string)
-	if vappName == "" {
-		panic("vApp name not found")
+func (cli *VCDClient) unLockParentVapp(d *schema.ResourceData, fieldName string) {
+	if fieldName == "" {
+		fieldName = "vapp_name"
 	}
-	key := fmt.Sprintf("org:%s|vdc:%s|vapp:%s", cli.getOrgName(d), cli.getVdcName(d), vappName)
+	vappIdentifier := d.Get(fieldName).(string)
+	if vappIdentifier == "" {
+		panic(fmt.Sprintf("vApp identifier not found for entity %s - %s", d.Get("name"), util.FuncNameCallStack()))
+	}
+	key := fmt.Sprintf("org:%s|vdc:%s|vapp:%s", cli.getOrgName(d), cli.getVdcName(d), vappIdentifier)
 	vcdMutexKV.Unlock(key)
 }
 

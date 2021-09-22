@@ -137,7 +137,7 @@ var vcdVAppVmV2Schema = map[string]*schema.Schema{
 	"power_on": &schema.Schema{
 		Type:        schema.TypeBool,
 		Optional:    true,
-		Default:     true,
+		Default:     false,
 		Description: "A boolean value stating if this VM should be powered on",
 	},
 	"storage_profile": &schema.Schema{
